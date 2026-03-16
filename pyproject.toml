@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "planninggraph"
+version = "0.1.0"
+description = "Decision graph extraction and maintenance for AI-assisted software development"
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic",
+    "openai",
+    "networkx",
+    "pydantic>=2",
+    "fastapi",
+    "uvicorn[standard]",
+    "httpx",
+    "streamlit",
+    "transformers",
+    "peft",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["planninggraph*", "api*", "eval*", "scripts*", "demo*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

@@ -1,0 +1,37 @@
+Language: Python. It's the obvious choice — every library you'll need (LLM APIs, NetworkX, HuggingFace for fine-tuning, spaCy for NLP preprocessing) has first-class Python support. No contest here.
+Interface: Library/API first, web demo later. For a course project with a 10-week timeline and a 6-person team, building a clean Python library with a simple FastAPI wrapper is the right call. It keeps the core logic testable and modular, and you can bolt on a lightweight web demo (using something like Streamlit) near the end if you want something visual to show in the final presentation. A VS Code extension would be the dream end state for this project but is way too much scope for now.
+
+Here's what I'd sketch as the full stack and development plan:
+Core stack:
+
+anthropic / openai Python SDKs for LLM calls
+networkx for graph storage and traversal (swap to Neo4j later if needed)
+pydantic for schema validation — every node and edge type gets a Pydantic model, which enforces the schema and makes serialization to/from JSON trivial
+fastapi as a thin API wrapper around the core library
+pytest for testing
+streamlit for a demo UI at the end (optional but nice)
+transformers + peft (LoRA) if fine-tuning becomes necessary
+
+Repo structure:
+planning-graph/
+├── planninggraph/
+│   ├── schema.py          # Pydantic models for all node/edge types
+│   ├── extractor.py       # LLM-based graph extraction from text
+│   ├── graph.py           # NetworkX wrapper: add, update, query, traverse
+│   ├── maintenance.py     # Incremental update + invalidation propagation
+│   ├── failure.py         # Anticipatory failure/risk surfacing
+│   └── prompts/           # All prompt templates as .txt or .py files
+├── api/
+│   └── main.py            # FastAPI endpoints
+├── eval/
+│   ├── annotated/         # Ground truth graphs (JSON)
+│   ├── metrics.py         # Node recall, edge precision, failure point recall
+│   └── run_eval.py
+├── scripts/
+│   ├── eda.py             # EDA over GitHub corpus
+│   └── finetune.py        # Fine-tuning pipeline (if needed)
+├── tests/
+├── data/                  # Raw GitHub READMEs, issues, post-mortems
+├── notebooks/             # Exploratory work
+└── demo/
+    └── app.py             # Streamlit demo
