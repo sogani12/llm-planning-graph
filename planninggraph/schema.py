@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import uuid
 from enum import Enum
-from typing import Optional
+from typing import Annotated, Literal, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Discriminator, Field, Tag
 
 
 # ---------------------------------------------------------------------------
@@ -64,39 +64,53 @@ class Edge(BaseModel):
 # ---------------------------------------------------------------------------
 
 class Objective(Node):
-    type: NodeType = NodeType.OBJECTIVE
+    type: Literal["objective"] = "objective"
 
 
 class Requirement(Node):
-    type: NodeType = NodeType.REQUIREMENT
+    type: Literal["requirement"] = "requirement"
     is_functional: bool = True
 
 
 class Assumption(Node):
-    type: NodeType = NodeType.ASSUMPTION
+    type: Literal["assumption"] = "assumption"
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     validated: bool = False
 
 
 class Decision(Node):
-    type: NodeType = NodeType.DECISION
+    type: Literal["decision"] = "decision"
     rationale: str = ""
-    alternatives_considered: list[str] = Field(default_factory=list) # not sure what elements of the list should look like
+    alternatives_considered: list[str] = Field(default_factory=list)
 
 
 class Component(Node):
-    type: NodeType = NodeType.COMPONENT
+    type: Literal["component"] = "component"
     file_refs: list[str] = Field(default_factory=list)
 
 
 class Interface(Node):
-    type: NodeType = NodeType.INTERFACE
+    type: Literal["interface"] = "interface"
     contract: str = ""
 
 
 class Risk(Node):
-    type: NodeType = NodeType.RISK
+    type: Literal["risk"] = "risk"
     severity: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
+AnyNode = Annotated[
+    Union[
+        Annotated[Objective, Tag("objective")],
+        Annotated[Requirement, Tag("requirement")],
+        Annotated[Assumption, Tag("assumption")],
+        Annotated[Decision, Tag("decision")],
+        Annotated[Component, Tag("component")],
+        Annotated[Interface, Tag("interface")],
+        Annotated[Risk, Tag("risk")],
+    ],
+    Discriminator("type"),
+]
 
 
 # ---------------------------------------------------------------------------
@@ -104,5 +118,5 @@ class Risk(Node):
 # ---------------------------------------------------------------------------
 
 class DecisionGraph(BaseModel):
-    nodes: list[Node] = Field(default_factory=list)
+    nodes: list[AnyNode] = Field(default_factory=list)
     edges: list[Edge] = Field(default_factory=list)
