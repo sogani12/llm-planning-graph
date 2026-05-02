@@ -2,6 +2,9 @@
 
 Comparative evaluation: Condition A (standard AI planning) vs Condition B (decision graph-augmented planning).
 
+The project prompt (`experiments/<project>/prompt.txt`) is **identical** for both conditions.
+The only difference is that Condition B uses a system prompt that instructs the agent to maintain a decision graph as it plans.
+
 ---
 
 ## Running an Experiment
@@ -19,33 +22,25 @@ Comparative evaluation: Condition A (standard AI planning) vs Condition B (decis
 
 ### Condition B — Graph-Augmented Planning
 
-**Setup:** Open two windows side by side:
-- Window 1: Claude Code / Cursor (planning session)
-- Window 2: A separate Claude chat at claude.ai (for graph extraction)
+**Setup:** In Claude Code, Cursor, or any Claude interface that supports a system prompt field, set the system prompt to the full contents of `planninggraph/prompts/extraction_system.txt` before starting.
 
-**Step 1.** In Window 2, start a new chat. Paste the entire contents of
-`planninggraph/prompts/extraction_system.txt` as the **system prompt** (use the
-system prompt field if available, otherwise prepend it before your first message).
+**Step 1.** With the system prompt set, paste `prompt.txt` as your opening message — the same message used in Condition A.
 
-**Step 2.** In Window 1, paste `prompt.txt` as your opening message. Also add:
-> "As we plan, I will periodically share an updated decision graph capturing our
-> decisions so far. Please take it into account when continuing."
+**Step 2.** Answer the agent's clarifying questions naturally, the same way you would in Condition A.
 
-**Step 3.** Answer the agent's clarifying questions. After each substantive exchange
-(2–4 turns), do the following:
+**Step 3.** The agent will plan in phases. After each phase it will:
+- Output a `[GRAPH UPDATE]` block containing the full graph JSON so far
+- Ask you 2–3 targeted follow-up questions about assumptions or risks it flagged
 
-- Copy the conversation so far
-- In Window 2, send: "Extract a decision graph from this planning conversation:\n\n[paste conversation]"
-- Copy the JSON response
-- Save it as `condition_b/graph_v1.json` (increment version each time)
-- Back in Window 1, send: "Here is the current decision graph from our planning so far. Continue with this in mind:\n\n[paste JSON]"
+Answer those questions naturally. The agent will update the graph and continue.
 
-**Step 4.** Repeat Step 3 until the plan is complete.
+**Step 4.** Repeat until the agent writes the final implementation plan.
 
 **Step 5.** Save:
 - Full conversation → `condition_b/conversation.md`
 - Final plan → `condition_b/plan.md`
-- Final graph JSON → `condition_b/graph_final.json`
+- Each graph version → `condition_b/graph_v1.json`, `graph_v2.json`, … (copy from `[GRAPH UPDATE]` blocks in the conversation)
+- Final graph → `condition_b/graph_final.json`
 
 ---
 
@@ -74,6 +69,8 @@ With the Streamlit demo running (`docker compose up demo`):
 ---
 
 ## Automated Extraction (once ANTHROPIC_API_KEY is set)
+
+For post-hoc extraction from a completed conversation (not needed during Condition B — the agent maintains the graph live):
 
 ```python
 from planninggraph.extractor import extract_graph
