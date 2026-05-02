@@ -4,7 +4,7 @@ import pytest
 
 from planninggraph.schema import (
     Objective, Requirement, Assumption, Decision,
-    Component, Interface, Risk, Edge, EdgeType, DecisionGraph,
+    Component, Interface, Risk, Test, Edge, EdgeType, DecisionGraph,
 )
 from planninggraph.graph import PlanningGraph
 

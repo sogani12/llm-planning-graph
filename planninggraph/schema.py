@@ -1,9 +1,10 @@
 """
 Pydantic models for all node and edge types in the decision graph.
 
-Node types:  Objective, Requirement, Assumption, Decision, Component, Interface, Risk
+Node types:  Objective, Requirement, Assumption, Decision, Component, Interface, Risk, Test
 Edge types:  motivated_by, assumes, implements, depends_on,
-             conflicts_with, invalidates, exposes, consumes
+             conflicts_with, invalidates, exposes, consumes,
+             verifies, guards_against, validates
 """
 
 from __future__ import annotations
@@ -27,17 +28,21 @@ class NodeType(str, Enum):
     COMPONENT = "component"
     INTERFACE = "interface"
     RISK = "risk"
+    TEST = "test"
 
 
 class EdgeType(str, Enum):
-    MOTIVATED_BY = "motivated_by"
-    ASSUMES = "assumes"
-    IMPLEMENTS = "implements"
-    DEPENDS_ON = "depends_on"
+    MOTIVATED_BY   = "motivated_by"
+    ASSUMES        = "assumes"
+    IMPLEMENTS     = "implements"
+    DEPENDS_ON     = "depends_on"
     CONFLICTS_WITH = "conflicts_with"
-    INVALIDATES = "invalidates"
-    EXPOSES = "exposes"
-    CONSUMES = "consumes"
+    INVALIDATES    = "invalidates"
+    EXPOSES        = "exposes"
+    CONSUMES       = "consumes"
+    VERIFIES       = "verifies"
+    GUARDS_AGAINST = "guards_against"
+    VALIDATES      = "validates"
 
 
 # ---------------------------------------------------------------------------
@@ -87,6 +92,7 @@ class Decision(Node):
 class Component(Node):
     type: Literal["component"] = "component"
     file_refs: list[str] = Field(default_factory=list)
+    has_tests: bool = False
 
 
 class Interface(Node):
@@ -99,6 +105,12 @@ class Risk(Node):
     severity: float = Field(default=0.5, ge=0.0, le=1.0)
 
 
+class Test(Node):
+    type: Literal["test"] = "test"
+    test_type: Literal["unit", "integration", "conformance", "end-to-end", "security"] = "unit"
+    status: Literal["planned", "written", "passing", "failing"] = "planned"
+
+
 AnyNode = Annotated[
     Union[
         Annotated[Objective, Tag("objective")],
@@ -108,6 +120,7 @@ AnyNode = Annotated[
         Annotated[Component, Tag("component")],
         Annotated[Interface, Tag("interface")],
         Annotated[Risk, Tag("risk")],
+        Annotated[Test, Tag("test")],
     ],
     Discriminator("type"),
 ]
