@@ -1,8 +1,12 @@
 """
 LLM-based decision graph extraction from unstructured text.
 
-Given a developer-AI conversation or project document, prompts Claude to extract
-nodes and edges according to the schema in schema.py.
+Given a completed developer-AI conversation or project document, prompts Claude
+to extract nodes and edges according to the schema in schema.py.
+
+Note: this is for post-hoc batch extraction from a finished conversation.
+For live graph-augmented planning (Condition B), see the system prompt at
+planninggraph/prompts/extraction_system.txt.
 
 Usage (automated, requires ANTHROPIC_API_KEY):
     from planninggraph.extractor import extract_graph
@@ -19,25 +23,51 @@ from __future__ import annotations
 import json
 import os
 import re
-from pathlib import Path
 
 from planninggraph.schema import DecisionGraph
 
-_PROMPTS_DIR = Path(__file__).parent / "prompts"
-_SYSTEM_PROMPT_PATH = _PROMPTS_DIR / "extraction_system.txt"
+# Inline extraction prompt — separate from the Condition B planning system prompt
+# (planninggraph/prompts/extraction_system.txt), which is used by the live planning agent.
+_EXTRACTION_PROMPT = """\
+You are an expert software architecture analyst. Read the developer–AI planning \
+conversation or design document below and extract a structured decision graph from it.
 
+Return ONLY valid JSON in this exact shape — no markdown fences, no explanation:
 
-def _load_system_prompt() -> str:
-    return _SYSTEM_PROMPT_PATH.read_text()
+{
+  "nodes": [ ...node objects... ],
+  "edges": [ ...edge objects... ]
+}
+
+Node types (8): objective, requirement, assumption, decision, component, interface, risk, test
+- objective: { id, type, label, description }
+- requirement: { id, type, label, description, is_functional }
+- assumption: { id, type, label, description, confidence (0-1), validated (bool) }
+- decision: { id, type, label, description, rationale, alternatives_considered (list) }
+- component: { id, type, label, description, file_refs (list), has_tests (bool) }
+- interface: { id, type, label, description, contract }
+- risk: { id, type, label, description, severity (0-1) }
+- test: { id, type, label, description, test_type, status }
+
+Edge types (11): motivated_by, assumes, implements, depends_on, conflicts_with,
+  invalidates, exposes, consumes, verifies, guards_against, validates
+Each edge: { id, type, source_id, target_id, rationale (optional) }
+
+Rules:
+- Every edge source_id and target_id must match a node id.
+- Extract implicit assumptions even when not stated directly.
+- Include all significant decisions with rationale and alternatives.
+- Include all notable risks with severity.
+- Aim for 15–25 nodes. Completeness over brevity.
+"""
 
 
 def print_extraction_prompt() -> None:
-    """Print the system prompt for manual use in a Claude chat session."""
+    """Print the extraction prompt for manual use in a Claude chat session."""
     print("=" * 70)
-    print("EXTRACTION SYSTEM PROMPT")
-    print("Copy everything below this line into the System Prompt field:")
+    print("EXTRACTION PROMPT — paste as system prompt in a Claude chat session")
     print("=" * 70)
-    print(_load_system_prompt())
+    print(_EXTRACTION_PROMPT)
 
 
 def _parse_graph(raw: str) -> DecisionGraph:
@@ -72,7 +102,7 @@ def extract_graph(text: str, model: str = "claude-sonnet-4-6") -> DecisionGraph:
         raise ImportError("anthropic package not installed. Run: pip install anthropic")
 
     client = anthropic.Anthropic(api_key=api_key)
-    system_prompt = _load_system_prompt()
+    system_prompt = _EXTRACTION_PROMPT
 
     def _call(user_content: str) -> str:
         response = client.messages.create(
