@@ -23,7 +23,9 @@ def health():
 @app.post("/extract")
 def extract(req: ExtractRequest):
     """Extract a decision graph from unstructured text."""
-    raise NotImplementedError
+    from planninggraph.extractor import extract_graph
+    graph = extract_graph(req.text)
+    return graph.model_dump()
 
 
 @app.post("/update")

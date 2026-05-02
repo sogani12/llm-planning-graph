@@ -1,0 +1,12 @@
+Build an automated overnight job application pipeline with the following capabilities:
+
+- Scrape job listings from multiple job boards, including standard sites and
+  auth-protected platforms (e.g. Wellfound, LinkedIn). Handle dynamic page
+  loading and bot detection.
+- Ingest scraped listings into a persistent database, deduplicating across runs.
+- Filter listings for relevance against a user profile (skills, seniority, role
+  preferences).
+- For each relevant job, generate a tailored, formatted resume PDF.
+- Run unattended as an overnight pipeline with full error recovery — no human
+  intervention once started.
+- Include a testing harness that validates scraping logic without live site calls.
