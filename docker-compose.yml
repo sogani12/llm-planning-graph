@@ -23,3 +23,15 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
     command: ["streamlit", "run", "demo/app.py", "--server.address", "0.0.0.0"]
+
+  eda:
+    build:
+      context: .
+      dockerfile: Dockerfile.scripts
+    volumes:
+      - .:/app
+    environment:
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+    profiles:
+      - tools
+    command: ["sh", "-c", "python scripts/fetch_corpus.py && python scripts/eda.py"]

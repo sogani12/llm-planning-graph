@@ -48,8 +48,6 @@ ALL_GITHUB_REPOS = [
 # Cap at 5 without a token to stay within rate limits
 GITHUB_REPOS = ALL_GITHUB_REPOS if GITHUB_TOKEN else ALL_GITHUB_REPOS[:5]
 
-DESIGN_LABELS = ["design", "rfc", "architecture", "decision", "proposal", "breaking-change"]
-
 # danluu/post-mortems: curated collection of public post-mortems in markdown
 POSTMORTEM_REPO = "danluu/post-mortems"
 
@@ -94,63 +92,63 @@ def clean_markdown(text: str) -> str:
 # Fetchers
 # ---------------------------------------------------------------------------
 
+SEARCH_KEYWORDS = "design OR architecture OR rfc OR proposal OR decision OR tradeoff"
+
+
 def fetch_github_issues(client: httpx.Client, repo: str) -> int:
-    """Fetch design-related issues + top comments for one repo."""
+    """Fetch design-related issues via title keyword search + top comments."""
     dest = RAW_DIR / "github" / repo.replace("/", "_")
     dest.mkdir(parents=True, exist_ok=True)
 
+    per_page = 20 if GITHUB_TOKEN else 10
     saved_ids: set[int] = set()
     count = 0
 
-    issues_per_label = 10 if GITHUB_TOKEN else 5
+    try:
+        results = gh_get(
+            client,
+            "https://api.github.com/search/issues",
+            q=f"repo:{repo} is:issue in:title {SEARCH_KEYWORDS}",
+            sort="interactions",
+            order="desc",
+            per_page=per_page,
+        )
+    except (httpx.HTTPStatusError, httpx.RequestError):
+        print(f"  {repo}: 0 issues saved")
+        return 0
 
-    for label in DESIGN_LABELS:
-        try:
-            issues = gh_get(
-                client,
-                f"https://api.github.com/repos/{repo}/issues",
-                labels=label,
-                state="all",
-                per_page=issues_per_label,
-                sort="comments",
-                direction="desc",
-            )
-        except (httpx.HTTPStatusError, httpx.RequestError):
+    issues = results.get("items", []) if isinstance(results, dict) else []
+
+    for issue in issues:
+        iid = issue.get("number")
+        if iid in saved_ids:
+            continue
+        saved_ids.add(iid)
+
+        body = issue.get("body") or ""
+        if len(body.strip()) < 80:
             continue
 
-        if not isinstance(issues, list):
-            continue
+        text = f"# {issue['title']}\n\n{body}"
 
-        for issue in issues:
-            iid = issue.get("number")
-            if iid in saved_ids:
-                continue
-            saved_ids.add(iid)
+        # Fetch top 5 comments for richer context
+        if issue.get("comments", 0) > 0:
+            try:
+                comments = gh_get(
+                    client,
+                    f"https://api.github.com/repos/{repo}/issues/{iid}/comments",
+                    per_page=5,
+                )
+                for c in (comments or [])[:5]:
+                    cbody = c.get("body") or ""
+                    if len(cbody.strip()) > 80:
+                        text += "\n\n---\n\n" + cbody
+            except (httpx.HTTPStatusError, httpx.RequestError):
+                pass
 
-            body = issue.get("body") or ""
-            if len(body.strip()) < 80:
-                continue
-
-            text = f"# {issue['title']}\n\n{body}"
-
-            # Fetch top 5 comments for richer context
-            if issue.get("comments", 0) > 0:
-                try:
-                    comments = gh_get(
-                        client,
-                        f"https://api.github.com/repos/{repo}/issues/{iid}/comments",
-                        per_page=5,
-                    )
-                    for c in (comments or [])[:5]:
-                        cbody = c.get("body") or ""
-                        if len(cbody.strip()) > 80:
-                            text += "\n\n---\n\n" + cbody
-                except (httpx.HTTPStatusError, httpx.RequestError):
-                    pass
-
-            out = dest / f"issue_{iid}.txt"
-            out.write_text(clean_markdown(text))
-            count += 1
+        out = dest / f"issue_{iid}.txt"
+        out.write_text(clean_markdown(text))
+        count += 1
 
     print(f"  {repo}: {count} issues saved")
     return count
@@ -185,7 +183,7 @@ def fetch_readme_and_adrs(client: httpx.Client, repo: str) -> int:
                         r = client.get(item["download_url"], timeout=20)
                         text = clean_markdown(r.text)
                         if len(text) > 200:
-                            safe_name = re.sub(r"[^\w.-]", "_", item["name"])
+                            safe_name = Path(re.sub(r"[^\w.-]", "_", item["name"])).with_suffix(".txt").name
                             (dest / safe_name).write_text(text)
                             count += 1
                     except (httpx.HTTPStatusError, httpx.RequestError):
@@ -197,40 +195,29 @@ def fetch_readme_and_adrs(client: httpx.Client, repo: str) -> int:
 
 
 def fetch_postmortems(client: httpx.Client) -> int:
-    """Fetch markdown post-mortems from danluu/post-mortems."""
+    """Fetch danluu/post-mortems curated list (README is the content)."""
     dest = RAW_DIR / "postmortems"
     dest.mkdir(parents=True, exist_ok=True)
 
     try:
-        contents = gh_get(client, f"https://api.github.com/repos/{POSTMORTEM_REPO}/contents/")
+        import base64
+        readme_data = gh_get(client, f"https://api.github.com/repos/{POSTMORTEM_REPO}/readme")
+        if not isinstance(readme_data, dict):
+            print("  post-mortems: unexpected response format")
+            return 0
+        content = base64.b64decode(readme_data.get("content", "")).decode("utf-8", errors="ignore")
+        text = clean_markdown(content)
+        if len(text) > 150:
+            (dest / "postmortems_list.txt").write_text(text)
+            print("  post-mortems: 1 file saved")
+            return 1
     except (httpx.HTTPStatusError, httpx.RequestError) as e:
-        print(f"  post-mortems: failed to list repo — {e}")
-        return 0
-
-    md_files = [
-        f for f in (contents if isinstance(contents, list) else [])
-        if f.get("name", "").endswith(".md") and f["name"] != "README.md"
-    ]
-
-    count = 0
-    for f in md_files[:25]:  # sample 25
-        try:
-            r = client.get(f["download_url"], timeout=20)
-            r.raise_for_status()
-            text = clean_markdown(r.text)
-            if len(text) > 150:
-                safe_name = re.sub(r"[^\w.-]", "_", f["name"])
-                (dest / safe_name).write_text(text)
-                count += 1
-        except (httpx.HTTPStatusError, httpx.RequestError):
-            pass
-
-    print(f"  post-mortems: {count} files saved")
-    return count
+        print(f"  post-mortems: failed — {e}")
+    return 0
 
 
 def fetch_stackoverflow(client: httpx.Client) -> int:
-    """Fetch [software-design] questions from Stack Overflow API."""
+    """Fetch [software-design] questions + top answers from Stack Overflow API."""
     dest = RAW_DIR / "stackoverflow"
     dest.mkdir(parents=True, exist_ok=True)
 
@@ -253,16 +240,48 @@ def fetch_stackoverflow(client: httpx.Client) -> int:
         print(f"  stackoverflow: failed — {e}")
         return 0
 
+    questions = {
+        q["question_id"]: {"title": q["title"], "body": q.get("body", "")}
+        for q in data.get("items", [])
+        if len(clean_markdown(q.get("body", ""))) >= 80
+    }
+    if not questions:
+        print("  stackoverflow: 0 questions saved")
+        return 0
+
+    # Fetch top 3 answers per question in one batched request
+    answers_by_qid: dict[int, list[str]] = {}
+    try:
+        ids = ";".join(str(qid) for qid in questions)
+        r = client.get(
+            f"https://api.stackexchange.com/2.3/questions/{ids}/answers",
+            params={
+                "site": "stackoverflow",
+                "filter": "withbody",
+                "sort": "votes",
+                "order": "desc",
+                "pagesize": 3 * len(questions),
+            },
+            timeout=30,
+        )
+        r.raise_for_status()
+        for a in r.json().get("items", []):
+            qid = a.get("question_id")
+            body = clean_markdown(a.get("body", ""))
+            if qid in questions and len(body) >= 80:
+                answers_by_qid.setdefault(qid, []).append(body)
+    except (httpx.HTTPStatusError, httpx.RequestError):
+        pass  # answers are bonus — proceed without them
+
     count = 0
-    for q in data.get("items", []):
-        body = clean_markdown(q.get("body", ""))
-        if len(body) < 80:
-            continue
-        text = f"{q['title']}\n\n{body}"
-        (dest / f"q_{q['question_id']}.txt").write_text(text)
+    for qid, q in questions.items():
+        text = f"{q['title']}\n\n{clean_markdown(q['body'])}"
+        for answer in answers_by_qid.get(qid, [])[:3]:
+            text += f"\n\n---\n\n{answer}"
+        (dest / f"q_{qid}.txt").write_text(text)
         count += 1
 
-    print(f"  stackoverflow: {count} questions saved")
+    print(f"  stackoverflow: {count} questions saved (with answers)")
     return count
 
 
