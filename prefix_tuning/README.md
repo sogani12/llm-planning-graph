@@ -14,6 +14,11 @@ runtime.py  → inference + adapter routing + generation
 
 # Overview
 
+## Motivation
+Implements the graph structure created in the rest of the repository. The prefix tuning helps guarantee that each prompt will remember and apply the ground truth information dervied from the planning graph.
+
+---
+
 ## Core Idea
 
 Instead of training one monolithic model, this system:

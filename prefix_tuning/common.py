@@ -214,46 +214,87 @@ def synthesize_routing_rules(adapter_specs: List[AdapterSpec]) -> Dict[str, Any]
 
 
 def default_adapter_specs(root: str = "./adapters") -> List[AdapterSpec]:
+    """
+    Graph-specialized prefix tuning adapters for DecisionGraph generation.
+    
+    Each adapter specializes in extracting planning graphs for different contexts:
+    - graph_high_risk: Risk-heavy systems (fault tolerance, security, compliance)
+    - graph_backend: Backend/API design (services, databases, scaling)
+    - graph_frontend: Frontend/UX (components, state management, interactions)
+    - graph_data: Data/ML pipelines (ETL, analytics, ML infrastructure)
+    - graph_default: Catch-all for other domains
+    """
     return [
         AdapterSpec(
-            name="finance_python",
-            output_dir=f"{root}/finance_python",
+            name="graph_high_risk",
+            output_dir=f"{root}/graph_high_risk",
             route_condition=RouteCondition(
-                frameworks_any=["python"],
-                directive_contains=["financial planning app", "budget", "forecast", "cashflow"],
-                response_mode="python_only",
-                allowed_paths_any=["backend/", "services/", "app/"],
+                directive_contains=["error", "recovery", "fault", "resilience", "security", "compliance"],
+                response_mode="structured_json",
             ),
+            num_virtual_tokens=20,
+            prefix_projection=True,
+            learning_rate=1e-4,
+            num_train_epochs=3.0,
+            per_device_train_batch_size=2,
+            gradient_accumulation_steps=8,
         ),
         AdapterSpec(
-            name="finance_sql",
-            output_dir=f"{root}/finance_sql",
+            name="graph_backend",
+            output_dir=f"{root}/graph_backend",
             route_condition=RouteCondition(
-                frameworks_any=["sql"],
-                directive_contains=["financial planning app", "budget", "forecast", "cashflow"],
-                allowed_paths_any=["db/", "migrations/", "sql/"],
+                frameworks_any=["python", "nodejs", "go", "rust", "java"],
+                directive_contains=["backend", "service", "api", "database", "scaling"],
+                response_mode="structured_json",
             ),
+            num_virtual_tokens=20,
+            prefix_projection=True,
+            learning_rate=1e-4,
+            num_train_epochs=3.0,
+            per_device_train_batch_size=2,
+            gradient_accumulation_steps=8,
         ),
         AdapterSpec(
-            name="backend_python",
-            output_dir=f"{root}/backend_python",
+            name="graph_frontend",
+            output_dir=f"{root}/graph_frontend",
             route_condition=RouteCondition(
-                frameworks_any=["python"],
-                response_mode="python_only",
-                allowed_paths_any=["backend/", "services/", "app/"],
+                frameworks_any=["react", "vue", "angular", "typescript", "javascript"],
+                directive_contains=["frontend", "ui", "ux", "component", "state management"],
+                response_mode="structured_json",
             ),
+            num_virtual_tokens=20,
+            prefix_projection=True,
+            learning_rate=1e-4,
+            num_train_epochs=3.0,
+            per_device_train_batch_size=2,
+            gradient_accumulation_steps=8,
         ),
         AdapterSpec(
-            name="db_sql",
-            output_dir=f"{root}/db_sql",
+            name="graph_data",
+            output_dir=f"{root}/graph_data",
             route_condition=RouteCondition(
-                frameworks_any=["sql"],
-                allowed_paths_any=["db/", "migrations/", "sql/"],
+                frameworks_any=["python", "sql", "spark", "kafka"],
+                directive_contains=["data", "pipeline", "etl", "analytics", "ml", "machine learning"],
+                response_mode="structured_json",
             ),
+            num_virtual_tokens=20,
+            prefix_projection=True,
+            learning_rate=1e-4,
+            num_train_epochs=3.0,
+            per_device_train_batch_size=2,
+            gradient_accumulation_steps=8,
         ),
         AdapterSpec(
-            name="default",
-            output_dir=f"{root}/default",
-            route_condition=RouteCondition(),
+            name="graph_default",
+            output_dir=f"{root}/graph_default",
+            route_condition=RouteCondition(
+                response_mode="structured_json",
+            ),
+            num_virtual_tokens=20,
+            prefix_projection=True,
+            learning_rate=1e-4,
+            num_train_epochs=3.0,
+            per_device_train_batch_size=2,
+            gradient_accumulation_steps=8,
         ),
     ]
