@@ -215,7 +215,7 @@ def render_graph(
         mid_ys.append((y0 + y1) / 2)
         rationale = getattr(edge, "rationale", "") or ""
         mid_hover.append(
-            f"<b>{edge.type.value}</b>"
+            f"<b>{(edge.type.value if hasattr(edge.type, 'value') else edge.type)}</b>"
             + (f"<br>{rationale}" if rationale else "")
         )
 
@@ -250,7 +250,7 @@ def render_graph(
             xs = [pos[n.id][0] for n in node_list]
             ys = [pos[n.id][1] for n in node_list]
             hover = [
-                f"<b>{n.type.value.upper()}</b><br>{n.label}"
+                f"<b>{(n.type.value if hasattr(n.type, 'value') else n.type).upper()}</b><br>{n.label}"
                 + (f"<br><br>{n.description}" if n.description else "")
                 for n in node_list
             ]

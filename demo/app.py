@@ -164,13 +164,13 @@ with st.sidebar:
     if dg is not None:
         st.markdown(f"**Nodes:** {len(dg.nodes)}  **Edges:** {len(dg.edges)}")
 
-        node_counts = Counter(n.type.value for n in dg.nodes)
+        node_counts = Counter((n.type.value if hasattr(n.type, 'value') else n.type) for n in dg.nodes)
         if node_counts:
             st.subheader("Nodes by type")
             for ntype, count in sorted(node_counts.items()):
                 st.write(f"- {ntype}: {count}")
 
-        edge_counts = Counter(e.type.value for e in dg.edges)
+        edge_counts = Counter((e.type.value if hasattr(e.type, 'value') else e.type) for e in dg.edges)
         if edge_counts:
             st.subheader("Edges by type")
             for etype, count in sorted(edge_counts.items()):
@@ -184,7 +184,7 @@ with st.sidebar:
                 st.divider()
                 st.subheader("Selected Node")
                 color = NODE_COLORS[node.type]
-                st.markdown(f"**{node.type.value.upper()}**")
+                st.markdown(f"**{(node.type.value if hasattr(node.type, 'value') else node.type).upper()}**")
                 st.markdown(f"**{node.label}**")
                 if node.description:
                     st.markdown(node.description)
@@ -212,6 +212,6 @@ with st.sidebar:
                         other_id = e.target_id if e.source_id == selected_id else e.source_id
                         other = node_map.get(other_id)
                         other_label = other.label if other else other_id
-                        st.write(f"- {e.type.value} {direction} **{other_label}**")
+                        st.write(f"- {(e.type.value if hasattr(e.type, 'value') else e.type)} {direction} **{other_label}**")
     else:
         st.info("No valid graph loaded.")
