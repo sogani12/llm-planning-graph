@@ -7,6 +7,11 @@ from pydantic import ValidationError
 from planninggraph.schema import DecisionGraph
 from planninggraph.viz import NODE_COLORS, compute_layout, render_graph
 
+
+def _enum_value(value: object) -> str:
+    return str(getattr(value, "value", value))
+
+
 # ---------------------------------------------------------------------------
 # Example graph (pre-filled so the app is immediately useful)
 # ---------------------------------------------------------------------------
@@ -164,13 +169,13 @@ with st.sidebar:
     if dg is not None:
         st.markdown(f"**Nodes:** {len(dg.nodes)}  **Edges:** {len(dg.edges)}")
 
-        node_counts = Counter(n.type.value for n in dg.nodes)
+        node_counts = Counter(_enum_value(n.type) for n in dg.nodes)
         if node_counts:
             st.subheader("Nodes by type")
             for ntype, count in sorted(node_counts.items()):
                 st.write(f"- {ntype}: {count}")
 
-        edge_counts = Counter(e.type.value for e in dg.edges)
+        edge_counts = Counter(_enum_value(e.type) for e in dg.edges)
         if edge_counts:
             st.subheader("Edges by type")
             for etype, count in sorted(edge_counts.items()):
@@ -184,7 +189,7 @@ with st.sidebar:
                 st.divider()
                 st.subheader("Selected Node")
                 color = NODE_COLORS[node.type]
-                st.markdown(f"**{node.type.value.upper()}**")
+                st.markdown(f"**{_enum_value(node.type).upper()}**")
                 st.markdown(f"**{node.label}**")
                 if node.description:
                     st.markdown(node.description)
@@ -212,6 +217,6 @@ with st.sidebar:
                         other_id = e.target_id if e.source_id == selected_id else e.source_id
                         other = node_map.get(other_id)
                         other_label = other.label if other else other_id
-                        st.write(f"- {e.type.value} {direction} **{other_label}**")
+                        st.write(f"- {_enum_value(e.type)} {direction} **{other_label}**")
     else:
         st.info("No valid graph loaded.")
