@@ -1,0 +1,180 @@
+{
+  "nodes": [
+    {
+      "id": "obj_overnight_run",
+      "type": "objective",
+      "label": "Unattended overnight execution",
+      "description": "The pipeline must run from approximately 2am to completion without any human interaction."
+    },
+    {
+      "id": "obj_price_history",
+      "type": "objective",
+      "label": "Full price history per product",
+      "description": "Every price observation must be persisted with a timestamp so the complete history is queryable over time."
+    },
+    {
+      "id": "obj_alert_on_drop",
+      "type": "objective",
+      "label": "Alert on price drop below threshold",
+      "description": "When a tracked product's price falls below a user-configured threshold, an alert must be triggered automatically."
+    },
+    {
+      "id": "req_dedup",
+      "type": "requirement",
+      "label": "Cross-run deduplication",
+      "description": "Scraping the same product in consecutive runs must not produce duplicate records in the database.",
+      "is_functional": true
+    },
+    {
+      "id": "req_auth_scraping",
+      "type": "requirement",
+      "label": "Auth-protected platform support",
+      "description": "The scraper must handle Amazon and Walmart, both of which require an authenticated session to return full product data.",
+      "is_functional": true
+    },
+    {
+      "id": "req_bot_detection",
+      "type": "requirement",
+      "label": "Bot-detection resilience",
+      "description": "The scraper must apply stealth measures sufficient to avoid trivial bot-detection on all three target platforms.",
+      "is_functional": true
+    },
+    {
+      "id": "req_error_recovery",
+      "type": "requirement",
+      "label": "Per-product error isolation",
+      "description": "A failure to scrape one product must not abort the pipeline; the error is logged and the run continues.",
+      "is_functional": true
+    },
+    {
+      "id": "req_offline_testing",
+      "type": "requirement",
+      "label": "Offline scraping tests",
+      "description": "Scraping and extraction logic must be testable against saved HTML fixtures without making live HTTP requests.",
+      "is_functional": true
+    },
+    {
+      "id": "dec_python_runtime",
+      "type": "decision",
+      "label": "Python 3.11+ runtime",
+      "description": "All pipeline code is written in Python 3.11+ running on Ubuntu 22.04.",
+      "rationale": "User is most comfortable with Python; no competing requirement justifies a different language.",
+      "alternatives_considered": ["Node.js", "Go"]
+    },
+    {
+      "id": "dec_playwright",
+      "type": "decision",
+      "label": "Playwright for browser automation",
+      "description": "Use Playwright (Python bindings) with playwright-stealth for all scraping, including auth-protected sites.",
+      "rationale": "Better async support, network interception API for fixture injection, and first-class stealth plugin compared to Selenium. Requests+BS4 ruled out because Amazon/Walmart render prices via JavaScript.",
+      "alternatives_considered": ["Selenium + undetected-chromedriver", "requests + BeautifulSoup"]
+    },
+    {
+      "id": "dec_sqlite",
+      "type": "decision",
+      "label": "SQLite for persistence",
+      "description": "Use SQLite (WAL mode) as the database. Accessed via the sqlite3 stdlib module wrapped in a thin helper layer.",
+      "rationale": "Zero infrastructure overhead for a personal 50-product use case on a VPS. PostgreSQL is unnecessary complexity.",
+      "alternatives_considered": ["PostgreSQL", "TinyDB", "flat CSV files"]
+    },
+    {
+      "id": "dec_email_alerts",
+      "type": "decision",
+      "label": "Gmail SMTP for alerts",
+      "description": "Send alert emails via smtplib using a Gmail app password stored in .env.",
+      "rationale": "User already has a Gmail account and wants zero additional cost. No Twilio or third-party API.",
+      "alternatives_considered": ["Twilio SMS", "SendGrid", "Mailgun"]
+    },
+    {
+      "id": "dec_apscheduler",
+      "type": "decision",
+      "label": "APScheduler for overnight scheduling",
+      "description": "Use APScheduler BackgroundScheduler with a cron trigger to fire the pipeline at 2am daily.",
+      "rationale": "Python-native scheduling keeps error handling within the same process. Avoids cron + shell script glue that loses Python exceptions.",
+      "alternatives_considered": ["system cron + shell script", "Celery beat", "rq-scheduler"]
+    },
+    {
+      "id": "dec_cookie_auth",
+      "type": "decision",
+      "label": "Cookie-file authentication",
+      "description": "User exports browser cookies to a Netscape-format file; Playwright loads them at session launch for Amazon and Walmart.",
+      "rationale": "Avoids storing plaintext credentials. Compatible with browser extensions like Cookie-Editor. Session is valid without re-login for 24-48h.",
+      "alternatives_considered": ["plaintext username/password login flow", "OAuth tokens", "no auth (public pages only)"]
+    },
+    {
+      "id": "asm_url_stable",
+      "type": "assumption",
+      "label": "Product URLs remain stable",
+      "description": "Assumes that product page URLs (canonical Amazon ASIN URL, eBay item URL, Walmart item URL) do not change or redirect unexpectedly between runs.",
+      "confidence": 0.85,
+      "validated": false
+    },
+    {
+      "id": "asm_price_in_html",
+      "type": "assumption",
+      "label": "Price is present in rendered DOM",
+      "description": "Assumes that after JavaScript rendering, the product price appears as text in the DOM and is reachable by a CSS selector.",
+      "confidence": 0.80,
+      "validated": false
+    },
+    {
+      "id": "asm_cookie_longevity",
+      "type": "assumption",
+      "label": "Exported cookies stay valid 24-48h",
+      "description": "Assumes that cookies exported from a logged-in browser session remain valid for at least one pipeline cycle (24h), so no mid-run re-authentication is needed.",
+      "confidence": 0.70,
+      "validated": false
+    },
+    {
+      "id": "asm_bot_detection_static",
+      "type": "assumption",
+      "label": "Bot-detection rules change slowly",
+      "description": "Assumes that the fingerprinting and bot-detection logic on Amazon, eBay, and Walmart does not change more frequently than once per week, giving time to patch selectors.",
+      "confidence": 0.65,
+      "validated": false
+    },
+    {
+      "id": "asm_smtp_reliable",
+      "type": "assumption",
+      "label": "Gmail SMTP available at 2am",
+      "description": "Assumes Gmail SMTP is reachable from the VPS at the scheduled run time and that the app password does not expire without notice.",
+      "confidence": 0.90,
+      "validated": false
+    },
+    {
+      "id": "risk_bot_detection",
+      "type": "risk",
+      "label": "Bot detection breaks scraping",
+      "description": "Amazon or Walmart may fingerprint the headless browser and return a CAPTCHA page or empty product data instead of a price.",
+      "severity": 0.85
+    },
+    {
+      "id": "risk_selector_change",
+      "type": "risk",
+      "label": "CSS selector breakage on site redesign",
+      "description": "A site redesign can silently break price extraction — the scraper returns None rather than raising an exception, causing missed alerts.",
+      "severity": 0.75
+    },
+    {
+      "id": "risk_captcha",
+      "type": "risk",
+      "label": "CAPTCHA blocks unattended session",
+      "description": "A CAPTCHA served mid-session has no automated bypass in this design. The run stalls or skips the affected product.",
+      "severity": 0.80
+    }
+  ],
+  "edges": [
+    { "id": "e01", "type": "motivated_by", "source_id": "dec_playwright", "target_id": "obj_overnight_run" },
+    { "id": "e02", "type": "motivated_by", "source_id": "dec_sqlite", "target_id": "obj_price_history" },
+    { "id": "e03", "type": "motivated_by", "source_id": "dec_email_alerts", "target_id": "obj_alert_on_drop" },
+    { "id": "e04", "type": "motivated_by", "source_id": "dec_apscheduler", "target_id": "obj_overnight_run" },
+    { "id": "e05", "type": "assumes", "source_id": "dec_cookie_auth", "target_id": "asm_cookie_longevity" },
+    { "id": "e06", "type": "assumes", "source_id": "dec_playwright", "target_id": "asm_price_in_html" },
+    { "id": "e07", "type": "assumes", "source_id": "dec_playwright", "target_id": "asm_bot_detection_static" },
+    { "id": "e08", "type": "assumes", "source_id": "dec_email_alerts", "target_id": "asm_smtp_reliable" },
+    { "id": "e09", "type": "conflicts_with", "source_id": "risk_bot_detection", "target_id": "req_bot_detection" },
+    { "id": "e10", "type": "conflicts_with", "source_id": "risk_selector_change", "target_id": "req_auth_scraping" },
+    { "id": "e11", "type": "invalidates", "source_id": "risk_captcha", "target_id": "asm_bot_detection_static" },
+    { "id": "e12", "type": "invalidates", "source_id": "risk_bot_detection", "target_id": "asm_price_in_html" }
+  ]
+}

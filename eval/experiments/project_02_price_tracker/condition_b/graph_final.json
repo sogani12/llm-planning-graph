@@ -1,0 +1,310 @@
+{
+  "nodes": [
+    {
+      "id": "obj_overnight_run",
+      "type": "objective",
+      "label": "Unattended overnight execution",
+      "description": "The pipeline must run from approximately 2am to completion without any human interaction."
+    },
+    {
+      "id": "obj_price_history",
+      "type": "objective",
+      "label": "Full price history per product",
+      "description": "Every price observation must be persisted with a timestamp so the complete history is queryable over time."
+    },
+    {
+      "id": "obj_alert_on_drop",
+      "type": "objective",
+      "label": "Alert on price drop below threshold",
+      "description": "When a tracked product's price falls below a user-configured threshold, an alert must be triggered automatically."
+    },
+    {
+      "id": "req_dedup",
+      "type": "requirement",
+      "label": "Cross-run deduplication",
+      "description": "Scraping the same product in the same run must not produce duplicate records; dedup key is (product_id, run_id).",
+      "is_functional": true
+    },
+    {
+      "id": "req_auth_scraping",
+      "type": "requirement",
+      "label": "Auth-protected platform support",
+      "description": "The scraper must handle Amazon and Walmart, which require an authenticated session via cookie replay.",
+      "is_functional": true
+    },
+    {
+      "id": "req_bot_detection",
+      "type": "requirement",
+      "label": "Bot-detection resilience",
+      "description": "The scraper must apply stealth measures sufficient to avoid trivial bot-detection on all three target platforms.",
+      "is_functional": true
+    },
+    {
+      "id": "req_error_recovery",
+      "type": "requirement",
+      "label": "Per-product error isolation",
+      "description": "A failure to scrape one product must not abort the pipeline; the error is logged and the run continues.",
+      "is_functional": true
+    },
+    {
+      "id": "req_offline_testing",
+      "type": "requirement",
+      "label": "Offline scraping tests",
+      "description": "Scraping and extraction logic must be testable against saved HTML fixtures without making live HTTP requests.",
+      "is_functional": true
+    },
+    {
+      "id": "dec_python_runtime",
+      "type": "decision",
+      "label": "Python 3.11+ runtime",
+      "description": "All pipeline code is written in Python 3.11+ running on Ubuntu 22.04.",
+      "rationale": "User is most comfortable with Python; no competing requirement justifies a different language.",
+      "alternatives_considered": ["Node.js", "Go"]
+    },
+    {
+      "id": "dec_playwright",
+      "type": "decision",
+      "label": "Playwright for browser automation",
+      "description": "Use Playwright (Python bindings) with playwright-stealth for all scraping, including auth-protected sites.",
+      "rationale": "Better async support, network interception API for fixture injection, and first-class stealth plugin compared to Selenium.",
+      "alternatives_considered": ["Selenium + undetected-chromedriver", "requests + BeautifulSoup"]
+    },
+    {
+      "id": "dec_sqlite",
+      "type": "decision",
+      "label": "SQLite for persistence",
+      "description": "Use SQLite (WAL mode). Schema: products, price_history (keyed by product_id + run_id), runs, thresholds tables.",
+      "rationale": "Zero infrastructure overhead for a personal 50-product use case on a VPS.",
+      "alternatives_considered": ["PostgreSQL", "TinyDB", "flat CSV files"]
+    },
+    {
+      "id": "dec_email_alerts",
+      "type": "decision",
+      "label": "Gmail SMTP for alerts",
+      "description": "Send alert emails via smtplib using a Gmail app password stored in .env. Always send a run-summary email on completion.",
+      "rationale": "User already has a Gmail account and wants zero additional cost. Run-summary email added for observability.",
+      "alternatives_considered": ["Twilio SMS", "SendGrid", "Mailgun"]
+    },
+    {
+      "id": "dec_apscheduler",
+      "type": "decision",
+      "label": "APScheduler for overnight scheduling",
+      "description": "Use APScheduler BackgroundScheduler with a cron trigger to fire the pipeline at 2am daily.",
+      "rationale": "Python-native scheduling keeps error handling within the same process.",
+      "alternatives_considered": ["system cron + shell script", "Celery beat", "rq-scheduler"]
+    },
+    {
+      "id": "dec_cookie_auth",
+      "type": "decision",
+      "label": "Cookie-file authentication",
+      "description": "User exports browser cookies to Netscape-format files; Playwright loads them at session launch for Amazon and Walmart. Expiry is detected and triggers a warning email.",
+      "rationale": "Avoids storing plaintext credentials. Session is valid for 24-48h.",
+      "alternatives_considered": ["plaintext username/password login flow", "OAuth tokens"]
+    },
+    {
+      "id": "dec_fixture_testing",
+      "type": "decision",
+      "label": "HTML fixture-based offline tests",
+      "description": "Save real product HTML pages in tests/fixtures/; patch Playwright page routing to serve fixture content during tests.",
+      "rationale": "Satisfies req_offline_testing while keeping tests deterministic and fast.",
+      "alternatives_considered": ["responses library HTTP mocking", "VCR.py cassette recording"]
+    },
+    {
+      "id": "asm_url_stable",
+      "type": "assumption",
+      "label": "Product URLs remain stable",
+      "description": "Assumes that product page URLs do not change or redirect unexpectedly between runs.",
+      "confidence": 0.85,
+      "validated": false
+    },
+    {
+      "id": "asm_price_in_html",
+      "type": "assumption",
+      "label": "Price is present in rendered DOM",
+      "description": "Assumes that after JavaScript rendering, the product price appears as text in the DOM reachable by a CSS selector.",
+      "confidence": 0.80,
+      "validated": false
+    },
+    {
+      "id": "asm_cookie_longevity",
+      "type": "assumption",
+      "label": "Exported cookies stay valid 24-48h",
+      "description": "Assumes that cookies exported from a logged-in browser session remain valid for at least one pipeline cycle.",
+      "confidence": 0.70,
+      "validated": false
+    },
+    {
+      "id": "asm_bot_detection_static",
+      "type": "assumption",
+      "label": "Bot-detection rules change slowly",
+      "description": "Assumes that fingerprinting logic on Amazon, eBay, and Walmart does not change more frequently than once per week.",
+      "confidence": 0.65,
+      "validated": false
+    },
+    {
+      "id": "asm_smtp_reliable",
+      "type": "assumption",
+      "label": "Gmail SMTP available at 2am",
+      "description": "Assumes Gmail SMTP is reachable from the VPS at the scheduled run time and that the app password does not expire without notice.",
+      "confidence": 0.90,
+      "validated": false
+    },
+    {
+      "id": "risk_bot_detection",
+      "type": "risk",
+      "label": "Bot detection breaks scraping",
+      "description": "Amazon or Walmart may fingerprint the headless browser and return a CAPTCHA page or empty product data.",
+      "severity": 0.85
+    },
+    {
+      "id": "risk_selector_change",
+      "type": "risk",
+      "label": "CSS selector breakage on site redesign",
+      "description": "A site redesign can silently break price extraction, returning None rather than raising an exception.",
+      "severity": 0.75
+    },
+    {
+      "id": "risk_captcha",
+      "type": "risk",
+      "label": "CAPTCHA blocks unattended session",
+      "description": "A CAPTCHA served mid-session has no automated bypass; the run stalls or skips the affected product.",
+      "severity": 0.80
+    },
+    {
+      "id": "risk_cookie_expiry",
+      "type": "risk",
+      "label": "Cookie expiry mid-run",
+      "description": "If an Amazon or Walmart session cookie expires during the run, the scraper lands on a login wall and may silently record wrong data.",
+      "severity": 0.70
+    },
+    {
+      "id": "risk_alert_failure",
+      "type": "risk",
+      "label": "SMTP alert silently dropped",
+      "description": "If the SMTP call fails (Gmail outage, wrong app password, blocked port), the alert is lost with no retry mechanism.",
+      "severity": 0.65
+    },
+    {
+      "id": "risk_run_duration",
+      "type": "risk",
+      "label": "Pipeline run exceeds overnight window",
+      "description": "With 50 products and 1-5s random delays, the run can take 30-60 minutes. A run-summary email mitigates the observability concern.",
+      "severity": 0.40
+    },
+    {
+      "id": "comp_scraper",
+      "type": "component",
+      "label": "Platform scraper",
+      "description": "Playwright-based scraper with one adapter per platform. Handles cookie loading, stealth, random delays, session-expiry detection, and price extraction.",
+      "file_refs": [
+        "src/pricetrack/scraper/base.py",
+        "src/pricetrack/scraper/amazon.py",
+        "src/pricetrack/scraper/ebay.py",
+        "src/pricetrack/scraper/walmart.py"
+      ]
+    },
+    {
+      "id": "comp_db",
+      "type": "component",
+      "label": "SQLite database layer",
+      "description": "Manages schema creation, upsert of price records with dedup by (product_id, run_id), threshold storage, and query helpers.",
+      "file_refs": ["src/pricetrack/db.py"]
+    },
+    {
+      "id": "comp_threshold_checker",
+      "type": "component",
+      "label": "Threshold checker",
+      "description": "After each successful scrape, queries the database for the latest price and compares against the configured threshold. Emits an AlertContract if crossed.",
+      "file_refs": ["src/pricetrack/checker.py"]
+    },
+    {
+      "id": "comp_alert",
+      "type": "component",
+      "label": "Email alert sender",
+      "description": "SMTP-based alert module. Handles price-drop, session-expiry, and run-failure templates. Always sends a run-summary on completion.",
+      "file_refs": ["src/pricetrack/alert.py"]
+    },
+    {
+      "id": "comp_scheduler",
+      "type": "component",
+      "label": "Pipeline scheduler",
+      "description": "APScheduler wrapper that sets up the 2am cron trigger, wraps the pipeline entry point, and sends a summary email on completion or failure.",
+      "file_refs": ["src/pricetrack/scheduler.py"]
+    },
+    {
+      "id": "iface_price_record",
+      "type": "interface",
+      "label": "PriceRecord data contract",
+      "description": "Canonical data structure exchanged between the scraper, database, and threshold checker.",
+      "contract": "{ product_id: str, url: str, platform: str, price: float | None, currency: str, scraped_at: str (ISO8601), status: 'ok' | 'error' | 'session_expired', run_id: str }"
+    },
+    {
+      "id": "iface_alert_contract",
+      "type": "interface",
+      "label": "AlertContract data contract",
+      "description": "Data structure consumed by the alert component for all alert types.",
+      "contract": "{ product_id: str, product_name: str, current_price: float, threshold_price: float, platform: str, product_url: str, alert_type: 'price_drop' | 'session_expired' | 'run_failure' }"
+    },
+    {
+      "id": "tst_scraper_fixtures",
+      "type": "test",
+      "label": "Scraper fixture tests",
+      "description": "Unit tests for each platform adapter using saved HTML fixture files. Patches Playwright page routing. Validates PriceRecord shape and price value.",
+      "test_type": "unit",
+      "status": "planned"
+    },
+    {
+      "id": "tst_dedup",
+      "type": "test",
+      "label": "Deduplication integration test",
+      "description": "Integration test using an in-memory SQLite database. Inserts two PriceRecords with identical (product_id, run_id) and asserts only one row is persisted.",
+      "test_type": "integration",
+      "status": "planned"
+    },
+    {
+      "id": "tst_alert_trigger",
+      "type": "test",
+      "label": "Alert trigger unit test",
+      "description": "Unit test that mocks smtplib.SMTP and asserts that the alert sender is called with the correct AlertContract when a price drops below threshold.",
+      "test_type": "unit",
+      "status": "planned"
+    }
+  ],
+  "edges": [
+    { "id": "e01", "type": "motivated_by", "source_id": "dec_playwright", "target_id": "obj_overnight_run" },
+    { "id": "e02", "type": "motivated_by", "source_id": "dec_sqlite", "target_id": "obj_price_history" },
+    { "id": "e03", "type": "motivated_by", "source_id": "dec_email_alerts", "target_id": "obj_alert_on_drop" },
+    { "id": "e04", "type": "motivated_by", "source_id": "dec_apscheduler", "target_id": "obj_overnight_run" },
+    { "id": "e05", "type": "assumes", "source_id": "dec_cookie_auth", "target_id": "asm_cookie_longevity" },
+    { "id": "e06", "type": "assumes", "source_id": "dec_playwright", "target_id": "asm_price_in_html" },
+    { "id": "e07", "type": "assumes", "source_id": "dec_playwright", "target_id": "asm_bot_detection_static" },
+    { "id": "e08", "type": "assumes", "source_id": "dec_email_alerts", "target_id": "asm_smtp_reliable" },
+    { "id": "e09", "type": "conflicts_with", "source_id": "risk_bot_detection", "target_id": "req_bot_detection" },
+    { "id": "e10", "type": "conflicts_with", "source_id": "risk_selector_change", "target_id": "req_auth_scraping" },
+    { "id": "e11", "type": "invalidates", "source_id": "risk_captcha", "target_id": "asm_bot_detection_static" },
+    { "id": "e12", "type": "invalidates", "source_id": "risk_bot_detection", "target_id": "asm_price_in_html" },
+    { "id": "e13", "type": "invalidates", "source_id": "risk_cookie_expiry", "target_id": "asm_cookie_longevity" },
+    { "id": "e14", "type": "implements", "source_id": "comp_scraper", "target_id": "req_auth_scraping" },
+    { "id": "e15", "type": "implements", "source_id": "comp_scraper", "target_id": "req_bot_detection" },
+    { "id": "e16", "type": "implements", "source_id": "comp_db", "target_id": "req_dedup" },
+    { "id": "e17", "type": "implements", "source_id": "comp_scheduler", "target_id": "req_error_recovery" },
+    { "id": "e18", "type": "exposes", "source_id": "comp_scraper", "target_id": "iface_price_record" },
+    { "id": "e19", "type": "consumes", "source_id": "comp_db", "target_id": "iface_price_record" },
+    { "id": "e20", "type": "consumes", "source_id": "comp_threshold_checker", "target_id": "iface_price_record" },
+    { "id": "e21", "type": "exposes", "source_id": "comp_threshold_checker", "target_id": "iface_alert_contract" },
+    { "id": "e22", "type": "consumes", "source_id": "comp_alert", "target_id": "iface_alert_contract" },
+    { "id": "e23", "type": "depends_on", "source_id": "comp_threshold_checker", "target_id": "comp_db" },
+    { "id": "e24", "type": "depends_on", "source_id": "comp_scheduler", "target_id": "comp_scraper" },
+    { "id": "e25", "type": "conflicts_with", "source_id": "risk_alert_failure", "target_id": "dec_email_alerts" },
+    { "id": "e26", "type": "verifies", "source_id": "tst_scraper_fixtures", "target_id": "comp_scraper" },
+    { "id": "e27", "type": "verifies", "source_id": "tst_dedup", "target_id": "comp_db" },
+    { "id": "e28", "type": "verifies", "source_id": "tst_alert_trigger", "target_id": "comp_threshold_checker" },
+    { "id": "e29", "type": "guards_against", "source_id": "tst_scraper_fixtures", "target_id": "risk_selector_change" },
+    { "id": "e30", "type": "guards_against", "source_id": "tst_dedup", "target_id": "risk_run_duration" },
+    { "id": "e31", "type": "validates", "source_id": "tst_scraper_fixtures", "target_id": "asm_price_in_html" },
+    { "id": "e32", "type": "validates", "source_id": "tst_alert_trigger", "target_id": "asm_smtp_reliable" },
+    { "id": "e33", "type": "implements", "source_id": "comp_scraper", "target_id": "req_offline_testing" },
+    { "id": "e34", "type": "depends_on", "source_id": "comp_alert", "target_id": "comp_threshold_checker" },
+    { "id": "e35", "type": "motivated_by", "source_id": "dec_fixture_testing", "target_id": "obj_overnight_run" }
+  ]
+}
