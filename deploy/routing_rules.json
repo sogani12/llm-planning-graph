@@ -1,0 +1,15 @@
+{
+  "rules": [
+    {
+      "adapter_name": "graph_extractor",
+      "priority": 0,
+      "condition": {
+        "frameworks_any": null,
+        "directive_contains": null,
+        "response_mode": "structured_json",
+        "allowed_paths_any": null
+      },
+      "adapter_path": "./adapters/graph_extractor"
+    }
+  ]
+}
