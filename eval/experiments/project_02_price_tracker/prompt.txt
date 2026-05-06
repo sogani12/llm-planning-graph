@@ -1,0 +1,14 @@
+Ask any clarifying questions you need before planning.
+
+Build an automated price tracking and alert system with the following capabilities:
+
+- Scrape product prices from multiple e-commerce platforms, including standard sites
+  and auth-protected platforms (e.g. Amazon, eBay, Walmart). Handle dynamic page
+  loading and bot detection.
+- Ingest scraped price data into a persistent database, deduplicating entries across
+  runs and tracking full price history per product.
+- Allow users to set price-drop thresholds per product. When a tracked product drops
+  below a user's threshold, trigger an alert (email or SMS).
+- Run unattended as an overnight pipeline with full error recovery — no human
+  intervention once started.
+- Include a testing harness that validates scraping logic without live site calls.
