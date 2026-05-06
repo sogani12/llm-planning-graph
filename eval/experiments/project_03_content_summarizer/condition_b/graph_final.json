@@ -1,0 +1,598 @@
+{
+    "nodes": [
+        {
+          "id": "obj_personalized_digest",
+          "type": "objective",
+          "label": "Personalized daily content digest",
+          "description": "Deliver a concise daily digest of relevant content tailored to a user profile."
+        },
+        {
+          "id": "obj_unattended_overnight",
+          "type": "objective",
+          "label": "Unattended overnight execution",
+          "description": "Run the full pipeline on a schedule without manual intervention and recover from failures."
+        },
+        {
+          "id": "req_multi_source_ingest",
+          "type": "requirement",
+          "label": "Multi-source public content ingestion",
+          "description": "Collect content from blogs, news, RSS feeds, and forums, including pagination and basic dynamic loading.",
+          "is_functional": true
+        },
+        {
+          "id": "req_persistent_dedup",
+          "type": "requirement",
+          "label": "Persistent cross-run deduplication",
+          "description": "Store content in a persistent database and prevent duplicate records across runs.",
+          "is_functional": true
+        },
+        {
+          "id": "req_relevance_filtering",
+          "type": "requirement",
+          "label": "Profile-based filtering and ranking",
+          "description": "Score and rank items by topics, keywords, and preferred sources from a user profile.",
+          "is_functional": true
+        },
+        {
+          "id": "req_summary_and_digest",
+          "type": "requirement",
+          "label": "Summaries and formatted digest output",
+          "description": "Generate concise summaries for relevant items and produce a clean daily digest in email or PDF form.",
+          "is_functional": true
+        },
+        {
+          "id": "req_observability_recovery",
+          "type": "requirement",
+          "label": "Robust logging and error recovery",
+          "description": "Provide structured logging, fault handling, and retry/recovery behavior for unattended runs.",
+          "is_functional": true
+        },
+        {
+          "id": "req_snapshot_test_harness",
+          "type": "requirement",
+          "label": "Snapshot-based parser validation",
+          "description": "Validate parsing and extraction logic using saved snapshots instead of live source calls.",
+          "is_functional": true
+        },
+        {
+          "id": "req_compliant_collection",
+          "type": "requirement",
+          "label": "Legally compliant source collection",
+          "description": "Only ingest from sources permitted by robots policies and terms, with an explicit allowlist gate.",
+          "is_functional": true
+        },
+        {
+          "id": "req_feedback_capture",
+          "type": "requirement",
+          "label": "Lightweight relevance feedback capture",
+          "description": "Collect simple per-item user feedback to improve ranking quality over time.",
+          "is_functional": true
+        },
+        {
+          "id": "req_daily_policy_check",
+          "type": "requirement",
+          "label": "Daily source policy verification",
+          "description": "Verify robots and terms constraints daily before collection starts.",
+          "is_functional": true
+        },
+        {
+          "id": "req_policy_failure_safe_mode",
+          "type": "requirement",
+          "label": "No-ingest safe mode on policy-check failure",
+          "description": "If policy verification fails, skip ingestion for that run and emit operational alerts.",
+          "is_functional": true
+        },
+        {
+          "id": "dec_python_orchestration",
+          "type": "decision",
+          "label": "Use Python as orchestration runtime",
+          "description": "Implement ingestion, ranking, summarization orchestration, and scheduling in Python.",
+          "rationale": "Strong ecosystem for scraping, NLP, data processing, and testing with low operational overhead for a single-project pipeline.",
+          "alternatives_considered": [
+            "Node.js/TypeScript",
+            "Go"
+          ]
+        },
+        {
+          "id": "dec_sqlite_storage",
+          "type": "decision",
+          "label": "Use SQLite for persistent content store",
+          "description": "Store normalized content, fingerprints, user profiles, runs, and digest artifacts in SQLite.",
+          "rationale": "Single-machine unattended pipeline favors minimal operations and simple deployment over multi-writer scalability.",
+          "alternatives_considered": [
+            "PostgreSQL",
+            "DuckDB"
+          ]
+        },
+        {
+          "id": "dec_hybrid_collection",
+          "type": "decision",
+          "label": "Hybrid feed-first collection strategy",
+          "description": "Use RSS/API ingestion first and only use headless browser scraping for sources that require dynamic rendering.",
+          "rationale": "Reduces fragility, runtime, and bot-detection risk compared with full browser scraping everywhere.",
+          "alternatives_considered": [
+            "Browser-only scraping",
+            "RSS/API-only ingestion"
+          ]
+        },
+        {
+          "id": "dec_two_stage_relevance",
+          "type": "decision",
+          "label": "Two-stage relevance and summarization",
+          "description": "Apply cheap keyword/BM25 prefiltering before LLM reranking and summarization on a reduced candidate set.",
+          "rationale": "Balances quality, cost, and latency when there is no strict preference for LLM-heavy or heuristic-only ranking.",
+          "alternatives_considered": [
+            "LLM-only ranking and summarization",
+            "Heuristic-only ranking"
+          ]
+        },
+        {
+          "id": "dec_feedback_loop_lightweight",
+          "type": "decision",
+          "label": "Add lightweight explicit feedback loop",
+          "description": "Capture simple positive/negative feedback on digest items and feed it into ranking weight updates.",
+          "rationale": "Low-friction feedback improves personalization while avoiding heavy UX and labeling overhead.",
+          "alternatives_considered": [
+            "No feedback loop",
+            "Implicit behavior-only feedback",
+            "Detailed multi-label annotation"
+          ]
+        },
+        {
+          "id": "dec_auto_source_quarantine",
+          "type": "decision",
+          "label": "Enable automatic source quarantine",
+          "description": "Automatically disable sources that fail extraction, trigger anti-bot blocks, or fail compliance checks until reviewed.",
+          "rationale": "Protects pipeline reliability and compliance by failing safely at source level instead of degrading entire runs.",
+          "alternatives_considered": [
+            "Best-effort continue with warnings",
+            "Abort entire run on source failure"
+          ]
+        },
+        {
+          "id": "dec_daily_policy_schedule",
+          "type": "decision",
+          "label": "Run policy checks daily pre-collection",
+          "description": "Execute source robots/terms verification as a daily gate before ingestion begins.",
+          "rationale": "Daily cadence catches policy drift early while remaining operationally simple.",
+          "alternatives_considered": [
+            "Weekly checks",
+            "Manual checks only",
+            "Per-request checks during scraping"
+          ]
+        },
+        {
+          "id": "dec_feedback_min_volume_fallback",
+          "type": "decision",
+          "label": "Fallback to baseline ranking on low feedback volume",
+          "description": "Keep baseline BM25/keyword weights until at least 50 explicit feedback votes are collected, then apply feedback-driven tuning.",
+          "rationale": "Prevents unstable personalization when explicit feedback volume is sparse.",
+          "alternatives_considered": [
+            "Always apply feedback updates",
+            "Disable feedback-driven tuning entirely"
+          ]
+        },
+        {
+          "id": "dec_quarantine_reenable_after_n_approvals",
+          "type": "decision",
+          "label": "Re-enable quarantined sources after N approvals",
+          "description": "Keep sources quarantined until they receive 2 explicit approval checks before re-entry.",
+          "rationale": "Reduces rapid quarantine/re-enable flapping while preserving controlled recovery.",
+          "alternatives_considered": [
+            "Manual re-enable only",
+            "Automatic re-enable after fixed time"
+          ]
+        },
+        {
+          "id": "dec_no_ingest_on_policy_check_failure",
+          "type": "decision",
+          "label": "Default to no-ingest when policy check fails",
+          "description": "Treat policy-check unavailability or failure as a hard gate and skip source ingestion for that run.",
+          "rationale": "Compliance-safe default avoids accidental collection under uncertain policy state.",
+          "alternatives_considered": [
+            "Proceed with last known policy state",
+            "Partial ingest with warnings"
+          ]
+        },
+        {
+          "id": "asm_sources_allow_collection",
+          "type": "assumption",
+          "label": "Allowlisted sources remain compliant",
+          "description": "Assumes selected source terms and robots policies remain stable between daily compliance checks.",
+          "confidence": 0.83,
+          "validated": false
+        },
+        {
+          "id": "asm_profile_signal_quality",
+          "type": "assumption",
+          "label": "User profile provides enough relevance signal",
+          "description": "Assumes topics, keywords, and source preferences are sufficient to rank content accurately.",
+          "confidence": 0.68,
+          "validated": false
+        },
+        {
+          "id": "asm_llm_summary_budget",
+          "type": "assumption",
+          "label": "LLM summarization cost and latency are acceptable",
+          "description": "Assumes nightly volume can be summarized within budget and overnight runtime constraints.",
+          "confidence": 0.71,
+          "validated": false
+        },
+        {
+          "id": "asm_feedback_participation",
+          "type": "assumption",
+          "label": "User provides enough feedback signals",
+          "description": "Assumes users will submit sufficient thumbs up/down signals to improve ranking quality.",
+          "confidence": 0.63,
+          "validated": false
+        },
+        {
+          "id": "asm_threshold_setting_effective",
+          "type": "assumption",
+          "label": "Feedback threshold value is well calibrated",
+          "description": "Assumes a 50-vote minimum threshold avoids both noisy updates and over-delayed personalization.",
+          "confidence": 0.75,
+          "validated": false
+        },
+        {
+          "id": "asm_approval_process_timely",
+          "type": "assumption",
+          "label": "Source approval process is timely",
+          "description": "Assumes two approval checks for quarantined sources can be completed quickly enough to avoid prolonged coverage loss.",
+          "confidence": 0.72,
+          "validated": false
+        },
+        {
+          "id": "comp_parser_adapters",
+          "type": "component",
+          "label": "Source parser adapters",
+          "description": "Per-source extraction adapters that normalize fetched content into the common internal schema.",
+          "has_tests": false
+        },
+        {
+          "id": "comp_policy_checker",
+          "type": "component",
+          "label": "Policy compliance checker",
+          "description": "Daily checker that validates robots and terms constraints before ingestion is allowed.",
+          "has_tests": false
+        },
+        {
+          "id": "comp_quarantine_manager",
+          "type": "component",
+          "label": "Source quarantine manager",
+          "description": "Tracks source health/compliance state, quarantines failing sources, and re-enables after approvals.",
+          "has_tests": false
+        },
+        {
+          "id": "iface_policy_check_result",
+          "type": "interface",
+          "label": "Policy check result contract",
+          "description": "Structured pass/fail contract output by the daily policy checker.",
+          "contract": "{ source_id, check_time, robots_allowed, terms_allowed, status, reason }"
+        },
+        {
+          "id": "tst_parser_snapshot_conformance",
+          "type": "test",
+          "label": "Parser snapshot conformance tests",
+          "description": "Conformance tests that run saved source snapshots through adapters and fail on extraction drift.",
+          "test_type": "conformance",
+          "status": "planned"
+        },
+        {
+          "id": "tst_policy_contract_conformance",
+          "type": "test",
+          "label": "Policy checker contract tests",
+          "description": "Conformance tests that validate policy-check outputs and no-ingest gate behavior on invalid results.",
+          "test_type": "conformance",
+          "status": "planned"
+        },
+        {
+          "id": "tst_quarantine_workflow_integration",
+          "type": "test",
+          "label": "Quarantine workflow integration tests",
+          "description": "Integration tests that validate quarantine transitions and re-enable only after two approvals.",
+          "test_type": "integration",
+          "status": "planned"
+        },
+        {
+          "id": "risk_source_layout_drift",
+          "type": "risk",
+          "label": "Source layout or markup drift",
+          "description": "Site template changes can silently break extraction logic and reduce digest quality.",
+          "severity": 0.78
+        },
+        {
+          "id": "risk_bot_mitigation_failure",
+          "type": "risk",
+          "label": "Bot mitigation blocks collection",
+          "description": "Anti-bot controls may block dynamic scraping paths and reduce source coverage.",
+          "severity": 0.74
+        },
+        {
+          "id": "risk_digest_quality_mismatch",
+          "type": "risk",
+          "label": "Digest quality misses user intent",
+          "description": "Filtering and summarization may over-compress or miss relevant items, reducing trust.",
+          "severity": 0.67
+        },
+        {
+          "id": "risk_terms_change_breaks_compliance",
+          "type": "risk",
+          "label": "Terms changes break compliance",
+          "description": "Source policy updates may invalidate prior allowlisting and force rapid source shutdowns.",
+          "severity": 0.72
+        }
+      ],
+      "edges": [
+        {
+          "type": "motivated_by",
+          "source_id": "dec_python_orchestration",
+          "target_id": "obj_unattended_overnight"
+        },
+        {
+          "type": "motivated_by",
+          "source_id": "dec_sqlite_storage",
+          "target_id": "obj_unattended_overnight"
+        },
+        {
+          "type": "motivated_by",
+          "source_id": "dec_hybrid_collection",
+          "target_id": "obj_personalized_digest"
+        },
+        {
+          "type": "motivated_by",
+          "source_id": "dec_two_stage_relevance",
+          "target_id": "obj_personalized_digest"
+        },
+        {
+          "type": "motivated_by",
+          "source_id": "dec_feedback_loop_lightweight",
+          "target_id": "obj_personalized_digest"
+        },
+        {
+          "type": "motivated_by",
+          "source_id": "dec_auto_source_quarantine",
+          "target_id": "obj_unattended_overnight"
+        },
+        {
+          "type": "motivated_by",
+          "source_id": "dec_daily_policy_schedule",
+          "target_id": "obj_unattended_overnight"
+        },
+        {
+          "type": "motivated_by",
+          "source_id": "dec_feedback_min_volume_fallback",
+          "target_id": "obj_personalized_digest"
+        },
+        {
+          "type": "motivated_by",
+          "source_id": "dec_quarantine_reenable_after_n_approvals",
+          "target_id": "obj_unattended_overnight"
+        },
+        {
+          "type": "motivated_by",
+          "source_id": "dec_no_ingest_on_policy_check_failure",
+          "target_id": "obj_unattended_overnight"
+        },
+        {
+          "type": "assumes",
+          "source_id": "dec_hybrid_collection",
+          "target_id": "asm_sources_allow_collection"
+        },
+        {
+          "type": "assumes",
+          "source_id": "dec_two_stage_relevance",
+          "target_id": "asm_profile_signal_quality"
+        },
+        {
+          "type": "assumes",
+          "source_id": "dec_two_stage_relevance",
+          "target_id": "asm_llm_summary_budget"
+        },
+        {
+          "type": "assumes",
+          "source_id": "dec_feedback_loop_lightweight",
+          "target_id": "asm_feedback_participation"
+        },
+        {
+          "type": "assumes",
+          "source_id": "dec_daily_policy_schedule",
+          "target_id": "asm_sources_allow_collection"
+        },
+        {
+          "type": "assumes",
+          "source_id": "dec_feedback_min_volume_fallback",
+          "target_id": "asm_threshold_setting_effective"
+        },
+        {
+          "type": "assumes",
+          "source_id": "dec_quarantine_reenable_after_n_approvals",
+          "target_id": "asm_approval_process_timely"
+        },
+        {
+          "type": "conflicts_with",
+          "source_id": "risk_source_layout_drift",
+          "target_id": "req_multi_source_ingest"
+        },
+        {
+          "type": "conflicts_with",
+          "source_id": "risk_bot_mitigation_failure",
+          "target_id": "req_multi_source_ingest"
+        },
+        {
+          "type": "conflicts_with",
+          "source_id": "risk_digest_quality_mismatch",
+          "target_id": "req_relevance_filtering"
+        },
+        {
+          "type": "invalidates",
+          "source_id": "risk_bot_mitigation_failure",
+          "target_id": "asm_sources_allow_collection"
+        },
+        {
+          "type": "conflicts_with",
+          "source_id": "risk_source_layout_drift",
+          "target_id": "req_snapshot_test_harness"
+        },
+        {
+          "type": "conflicts_with",
+          "source_id": "risk_terms_change_breaks_compliance",
+          "target_id": "req_compliant_collection"
+        },
+        {
+          "type": "invalidates",
+          "source_id": "risk_terms_change_breaks_compliance",
+          "target_id": "asm_sources_allow_collection"
+        },
+        {
+          "type": "conflicts_with",
+          "source_id": "risk_source_layout_drift",
+          "target_id": "dec_hybrid_collection"
+        },
+        {
+          "type": "conflicts_with",
+          "source_id": "risk_bot_mitigation_failure",
+          "target_id": "dec_hybrid_collection"
+        },
+        {
+          "type": "conflicts_with",
+          "source_id": "risk_terms_change_breaks_compliance",
+          "target_id": "dec_hybrid_collection"
+        },
+        {
+          "type": "conflicts_with",
+          "source_id": "risk_digest_quality_mismatch",
+          "target_id": "dec_feedback_loop_lightweight"
+        },
+        {
+          "type": "conflicts_with",
+          "source_id": "risk_bot_mitigation_failure",
+          "target_id": "dec_quarantine_reenable_after_n_approvals"
+        },
+        {
+          "type": "implements",
+          "source_id": "dec_feedback_loop_lightweight",
+          "target_id": "req_feedback_capture"
+        },
+        {
+          "type": "implements",
+          "source_id": "dec_daily_policy_schedule",
+          "target_id": "req_daily_policy_check"
+        },
+        {
+          "type": "implements",
+          "source_id": "dec_auto_source_quarantine",
+          "target_id": "req_observability_recovery"
+        },
+        {
+          "type": "implements",
+          "source_id": "dec_feedback_min_volume_fallback",
+          "target_id": "req_relevance_filtering"
+        },
+        {
+          "type": "implements",
+          "source_id": "dec_quarantine_reenable_after_n_approvals",
+          "target_id": "req_multi_source_ingest"
+        },
+        {
+          "type": "implements",
+          "source_id": "dec_no_ingest_on_policy_check_failure",
+          "target_id": "req_policy_failure_safe_mode"
+        },
+        {
+          "type": "implements",
+          "source_id": "comp_parser_adapters",
+          "target_id": "req_multi_source_ingest"
+        },
+        {
+          "type": "implements",
+          "source_id": "comp_parser_adapters",
+          "target_id": "req_snapshot_test_harness"
+        },
+        {
+          "type": "implements",
+          "source_id": "comp_policy_checker",
+          "target_id": "req_daily_policy_check"
+        },
+        {
+          "type": "implements",
+          "source_id": "comp_policy_checker",
+          "target_id": "req_compliant_collection"
+        },
+        {
+          "type": "implements",
+          "source_id": "comp_quarantine_manager",
+          "target_id": "req_observability_recovery"
+        },
+        {
+          "type": "implements",
+          "source_id": "comp_quarantine_manager",
+          "target_id": "req_multi_source_ingest"
+        },
+        {
+          "type": "depends_on",
+          "source_id": "comp_quarantine_manager",
+          "target_id": "comp_policy_checker"
+        },
+        {
+          "type": "exposes",
+          "source_id": "comp_policy_checker",
+          "target_id": "iface_policy_check_result"
+        },
+        {
+          "type": "consumes",
+          "source_id": "comp_quarantine_manager",
+          "target_id": "iface_policy_check_result"
+        },
+        {
+          "type": "verifies",
+          "source_id": "tst_parser_snapshot_conformance",
+          "target_id": "comp_parser_adapters"
+        },
+        {
+          "type": "verifies",
+          "source_id": "tst_policy_contract_conformance",
+          "target_id": "comp_policy_checker"
+        },
+        {
+          "type": "verifies",
+          "source_id": "tst_policy_contract_conformance",
+          "target_id": "iface_policy_check_result"
+        },
+        {
+          "type": "verifies",
+          "source_id": "tst_quarantine_workflow_integration",
+          "target_id": "comp_quarantine_manager"
+        },
+        {
+          "type": "guards_against",
+          "source_id": "tst_parser_snapshot_conformance",
+          "target_id": "risk_source_layout_drift"
+        },
+        {
+          "type": "guards_against",
+          "source_id": "tst_policy_contract_conformance",
+          "target_id": "risk_terms_change_breaks_compliance"
+        },
+        {
+          "type": "guards_against",
+          "source_id": "tst_quarantine_workflow_integration",
+          "target_id": "risk_bot_mitigation_failure"
+        },
+        {
+          "type": "validates",
+          "source_id": "tst_parser_snapshot_conformance",
+          "target_id": "dec_hybrid_collection"
+        },
+        {
+          "type": "validates",
+          "source_id": "tst_policy_contract_conformance",
+          "target_id": "dec_no_ingest_on_policy_check_failure"
+        },
+        {
+          "type": "validates",
+          "source_id": "tst_quarantine_workflow_integration",
+          "target_id": "dec_quarantine_reenable_after_n_approvals"
+        }
+      ]
+}

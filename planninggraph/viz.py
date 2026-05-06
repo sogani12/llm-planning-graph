@@ -55,6 +55,19 @@ EDGE_DASH = {
 }
 
 
+def _enum_value(value: object) -> str:
+    """Return the string value for either an Enum instance or a raw string."""
+    return getattr(value, "value", value)
+
+
+def _node_type_label(node_type: object) -> str:
+    return str(_enum_value(node_type))
+
+
+def _edge_type_label(edge_type: object) -> str:
+    return str(_enum_value(edge_type))
+
+
 def _truncate(text: str, max_len: int = 25) -> str:
     return text if len(text) <= max_len else text[:max_len - 1] + "…"
 
@@ -215,7 +228,7 @@ def render_graph(
         mid_ys.append((y0 + y1) / 2)
         rationale = getattr(edge, "rationale", "") or ""
         mid_hover.append(
-            f"<b>{(edge.type.value if hasattr(edge.type, 'value') else edge.type)}</b>"
+            f"<b>{_edge_type_label(edge.type)}</b>"
             + (f"<br>{rationale}" if rationale else "")
         )
 
@@ -250,7 +263,7 @@ def render_graph(
             xs = [pos[n.id][0] for n in node_list]
             ys = [pos[n.id][1] for n in node_list]
             hover = [
-                f"<b>{(n.type.value if hasattr(n.type, 'value') else n.type).upper()}</b><br>{n.label}"
+                f"<b>{_node_type_label(n.type).upper()}</b><br>{n.label}"
                 + (f"<br><br>{n.description}" if n.description else "")
                 for n in node_list
             ]

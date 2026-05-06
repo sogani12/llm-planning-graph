@@ -1,0 +1,10 @@
+Ask any clarifying questions you need before planning
+
+Build an automated personalized content monitoring and summarization pipeline with the following capabilities:
+
+- Scrape or ingest content from multiple public sources (e.g., blogs, news sites, RSS feeds, forums). Handle pagination and basic dynamic loading where necessary.
+- Ingest collected content into a persistent database, deduplicating across runs.
+- Filter and rank content for relevance against a user profile (topics of interest, keywords, preferred sources).
+- Generate concise summaries for each relevant item and compile a clean, formatted daily digest (email or PDF).
+- Run unattended as an overnight scheduled job with robust logging and error recovery.
+- Include a testing harness that validates parsing and extraction logic using saved content snapshots instead of live site calls.

@@ -174,7 +174,6 @@ def train_one_adapter_with_metrics(
     
     args = TrainingArguments(
         output_dir=spec.output_dir,
-        overwrite_output_dir=True,
         learning_rate=spec.learning_rate,
         num_train_epochs=int(spec.num_train_epochs),
         per_device_train_batch_size=spec.per_device_train_batch_size,

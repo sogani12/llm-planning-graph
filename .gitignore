@@ -46,3 +46,5 @@ Thumbs.db
 
 # LibreOffice lock files
 .~lock.*
+
+prefix_tuning/docs/
