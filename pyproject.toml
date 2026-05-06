@@ -18,6 +18,7 @@ dependencies = [
     "streamlit",
     "transformers",
     "peft",
+    "plotly"
 ]
 
 [project.optional-dependencies]
