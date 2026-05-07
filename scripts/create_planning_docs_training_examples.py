@@ -1,26 +1,10 @@
-"""
-Generate training examples from planning documentation files.
-Converts planning documents (like extraction_system.txt) into DecisionGraph training examples.
-"""
-
 import json
 import sys
 from pathlib import Path
-
-# Add parent directory to path for imports
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-
-
 def create_extraction_system_example():
-    """
-    Create a training example from extraction_system.txt.
-    This is a meta-example: the document describes how to build planning graphs,
-    so we extract a graph about planning systems themselves.
-    """
-    
-    # The ground-truth DecisionGraph extracted from extraction_system.txt
     ground_truth_graph = {
         "nodes": [
             {
@@ -202,11 +186,7 @@ def create_extraction_system_example():
             }
         ]
     }
-    
-    # Repo context: the extraction_system.txt file content
     repo_context = Path(project_root / "planninggraph" / "prompts" / "extraction_system.txt").read_text()[:2000]
-    
-    # Create training example
     example = {
         "meta": {
             "frameworks": ["planning", "architecture", "documentation"],
@@ -231,23 +211,12 @@ def create_extraction_system_example():
             "document_type": "schema_definition"
         }
     }
-    
     return example
 
-
 def create_planning_doc_training_set():
-    """
-    Create training examples for planning document extraction.
-    Returns training, validation, and test splits.
-    """
-    
     examples = []
-    
-    # Example 1: extraction_system.txt (schema definition)
     ex1 = create_extraction_system_example()
     examples.append(ex1)
-    
-    # Example 2: Variation of example 1 with different query phrasing
     ex2_base = create_extraction_system_example()
     ex2_base["user_query"] = (
         "Design a graph data model that captures: "
@@ -262,8 +231,6 @@ def create_planning_doc_training_set():
         "Include all relationships between these elements."
     )
     examples.append(ex2_base)
-    
-    # Example 3: Variation with technical focus
     ex3_base = create_extraction_system_example()
     ex3_base["user_query"] = (
         "From this planning framework, extract: "
@@ -274,15 +241,11 @@ def create_planning_doc_training_set():
         "5) All explicit requirements"
     )
     examples.append(ex3_base)
-    
-    # Split: 60% train, 20% val, 20% test
     train_count = max(1, len(examples) * 60 // 100)
     val_count = max(1, len(examples) * 20 // 100)
-    
     train_split = examples[:train_count]
     val_split = examples[train_count:train_count + val_count]
     test_split = examples[train_count + val_count:]
-    
     return {
         "all": examples,
         "train": train_split,
@@ -290,28 +253,21 @@ def create_planning_doc_training_set():
         "test": test_split
     }
 
-
 def main():
-    """Generate and save planning doc training examples."""
     splits = create_planning_doc_training_set()
-    
     data_dir = project_root / "data"
     data_dir.mkdir(exist_ok=True)
-    
-    # Save all splits
     for split_name, examples in splits.items():
         output_file = data_dir / f"planning_docs_training_{split_name}.json"
         with open(output_file, "w") as f:
             json.dump(examples, f, indent=2)
         print(f"✓ Created {output_file} ({len(examples)} examples)")
-    
     print(f"\nGenerated {len(splits['all'])} planning doc training examples")
     print("Files created:")
     print(f"  - data/planning_docs_training_all.json")
     print(f"  - data/planning_docs_training_train.json")
     print(f"  - data/planning_docs_training_val.json")
     print(f"  - data/planning_docs_training_test.json")
-
 
 if __name__ == "__main__":
     main()

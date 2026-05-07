@@ -1,8 +1,3 @@
-"""
-Expand planning docs training dataset with diverse document types.
-Generates more comprehensive training examples for the universal graph extractor.
-"""
-
 import json
 import sys
 from pathlib import Path
@@ -10,9 +5,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-
 def create_adr_example():
-    """Architecture Decision Record example."""
     graph = {
         "nodes": [
             {
@@ -80,7 +73,6 @@ def create_adr_example():
             {"source_id": "comp_user_service", "target_id": "comp_api_gateway", "type": "depends_on"}
         ]
     }
-    
     return {
         "meta": {
             "frameworks": ["microservices", "api", "caching"],
@@ -95,9 +87,7 @@ def create_adr_example():
         "source": {"type": "adr", "document_type": "architecture_decision_record"}
     }
 
-
 def create_rfc_example():
-    """Request for Comments style document."""
     graph = {
         "nodes": [
             {
@@ -158,7 +148,6 @@ def create_rfc_example():
             {"source_id": "tst_conflict_resolution", "target_id": "comp_sync_engine", "type": "verifies"}
         ]
     }
-    
     return {
         "meta": {
             "frameworks": ["crdt", "realtime", "collaboration"],
@@ -173,9 +162,7 @@ def create_rfc_example():
         "source": {"type": "rfc", "document_type": "design_proposal"}
     }
 
-
 def create_database_schema_example():
-    """Database design and schema planning."""
     graph = {
         "nodes": [
             {
@@ -235,7 +222,6 @@ def create_database_schema_example():
             {"source_id": "risk_storage_cost", "target_id": "dec_columnar_storage", "type": "conflicts_with"}
         ]
     }
-    
     return {
         "meta": {
             "frameworks": ["sql", "analytics", "data-warehouse"],
@@ -250,9 +236,7 @@ def create_database_schema_example():
         "source": {"type": "design_spec", "document_type": "database_schema"}
     }
 
-
 def create_security_planning_example():
-    """Security and compliance planning document."""
     graph = {
         "nodes": [
             {
@@ -329,7 +313,6 @@ def create_security_planning_example():
             {"source_id": "tst_encryption_validation", "target_id": "comp_auth_service", "type": "verifies"}
         ]
     }
-    
     return {
         "meta": {
             "frameworks": ["security", "compliance", "cryptography"],
@@ -344,9 +327,7 @@ def create_security_planning_example():
         "source": {"type": "security_planning", "document_type": "compliance_doc"}
     }
 
-
 def create_ml_pipeline_example():
-    """Machine learning pipeline design."""
     graph = {
         "nodes": [
             {
@@ -414,7 +395,6 @@ def create_ml_pipeline_example():
             {"source_id": "risk_model_drift", "target_id": "asm_data_quality", "type": "invalidates"}
         ]
     }
-    
     return {
         "meta": {
             "frameworks": ["ml", "python", "tensorflow"],
@@ -429,51 +409,36 @@ def create_ml_pipeline_example():
         "source": {"type": "ml_design", "document_type": "ml_pipeline_spec"}
     }
 
-
 def main():
-    """Generate expanded planning docs dataset."""
     examples = [
-        # Original extraction_system.txt example
-        # (would be loaded from create_planning_docs_training_examples if available)
-        
-        # New diverse examples
         create_adr_example(),
         create_rfc_example(),
         create_database_schema_example(),
         create_security_planning_example(),
         create_ml_pipeline_example(),
     ]
-    
     data_dir = project_root / "data"
     data_dir.mkdir(exist_ok=True)
-    
-    # Save all examples
     output_file = data_dir / "planning_docs_expanded_all.json"
     with open(output_file, "w") as f:
         json.dump(examples, f, indent=2)
-    print(f"✓ Created {output_file} ({len(examples)} examples)")
-    
-    # Split: 70% train, 15% val, 15% test
+    print(f"Created {output_file} ({len(examples)} examples)")
     import math
     train_count = math.ceil(len(examples) * 0.7)
     val_count = math.ceil(len(examples) * 0.15)
-    
     train_split = examples[:train_count]
     val_split = examples[train_count:train_count + val_count]
     test_split = examples[train_count + val_count:]
-    
     splits = {
         "train": train_split,
         "val": val_split,
         "test": test_split,
     }
-    
     for split_name, split_examples in splits.items():
         output_file = data_dir / f"planning_docs_expanded_{split_name}.json"
         with open(output_file, "w") as f:
             json.dump(split_examples, f, indent=2)
-        print(f"✓ Created {output_file} ({len(split_examples)} examples)")
-    
+        print(f"Created {output_file} ({len(split_examples)} examples)")
     print(f"\nGenerated {len(examples)} diverse planning doc training examples")
     print(f"Train/Val/Test split: {train_count}/{val_count}/{len(test_split)}")
     print("\nFiles created:")
@@ -481,7 +446,6 @@ def main():
     print(f"  - data/planning_docs_expanded_train.json ({len(train_split)} examples)")
     print(f"  - data/planning_docs_expanded_val.json ({len(val_split)} examples)")
     print(f"  - data/planning_docs_expanded_test.json ({len(test_split)} examples)")
-
 
 if __name__ == "__main__":
     main()
