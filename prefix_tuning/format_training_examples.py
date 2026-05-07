@@ -240,7 +240,7 @@ def add_example_from_existing_graphs(
                 graph = json.load(f)
             
             # Create minimal training example
-            from graph_classifier import classify_graph, build_metadata_from_characteristics
+            from prefix_tuning.graph_classifier import classify_graph, build_metadata_from_characteristics
             
             characteristics = classify_graph(graph)
             metadata = build_metadata_from_characteristics(characteristics)
