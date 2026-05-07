@@ -1,531 +1,882 @@
-user: 
+cursor: Exploring the workspace for context, then asking critical clarifying questions before we build the Phase 1 decision graph.
+Workspace is empty — greenfield project. Asking a few high-impact questions that determine architecture, legal exposure, and reliability.
 
-cursor: I'll start by checking if there's any existing context in the workspace, then ask the most decision-shaping questions before Phase 1.
-ls -la /Users/namans/cond-B 2>/dev/null | head -30
-total 0
-drwxr-xr-x    2 namans  staff    64 May  2 17:25 .
-drwxr-x---@ 112 namans  staff  3584 May  2 17:44 ..
-Empty workspace — this is greenfield. Before I start building the decision graph, I need to lock in two choices that will fork the entire architecture. Everything else (component boundaries, testing strategy, error recovery) can be decided downstream of these.
+What should the overnight pipeline do after filtering relevant jobs? (This drives browser automation depth, CAPTCHA handling, and ToS risk.)
+Above + prepare per-job application packets (cover letter text, answers file) but human submits
+How should authenticated boards (LinkedIn, Wellfound, etc.) obtain sessions for unattended runs?
+Dedicated browser user-data-dir / Playwright storageState refreshed periodically by a short manual login helper
+Where will the overnight job run? (Affects IP reputation, scheduling, and headful vs headless tradeoffs.)
+Same machine but packaged in Docker for reproducibility
 
-What runtime and resume-generation approach should the pipeline use? (Picks the language ecosystem AND how each tailored resume PDF is produced - these are tightly coupled.)
-Node/TypeScript + Playwright + hosted LLM
-API
-How should the pipeline handle auth-protected boards (Linkedin, Wellfound)? This drives the bot-detection risk profile and what
-'unattended overnight' actually means.
-Mix: session reuse for Linkedin/Wellfound, public scraping for everything else
-
-Locked in: Node/TypeScript + Playwright + hosted LLM API, with mixed auth (persisted sessions for LinkedIn/Wellfound, public scraping for the rest). Building the Phase 1 graph now.
+Here’s Phase 1 after your answers: scope is discover → DB → filter → tailored resume PDF → application packet (cover letter + structured answers) with human submit; auth is Playwright storageState / persistent context with a periodic manual refresh helper; runtime is local Docker on your machine.
+Pushback (before locking this in)
+Docker on macOS + “log in once in a real browser profile” is often the brittle part: GUI login flows and persistent profiles are much smoother on the host than inside a typical Linux container on Mac (no real display, profile path quirks, anti-bot signals). A stronger pattern is usually: orchestration + DB in Docker, but Playwright uses a host-mounted profile directory (or a small host-side “login refresh” script that writes storageState.json into a volume the container consumes). If you want maximum reliability, we should treat “everything in one container including interactive login” as a non-goal unless you explicitly want that pain.
+I’ve captured that tension as assumptions/risks in the graph below.
 [GRAPH UPDATE]
 {
-"nodes": [
-{ "id": "obj_overnight_run", "type": "objective", "label": "Unattended overnight execution", "description": "Pipeline runs start-to-finish without human intervention, recovering from transient errors." },
-{ "id": "obj_multi_board_coverage", "type": "objective", "label": "Coverage across many job boards", "description": "Aggregate listings from public ATSes and auth-walled platforms in a single run." },
-{ "id": "obj_only_relevant", "type": "objective", "label": "Only act on relevant jobs", "description": "Avoid wasting LLM tokens and PDF generation on jobs that don't match the user profile." },
-{ "id": "obj_offline_testable", "type": "objective", "label": "Testable without live sites", "description": "Scraper logic must be exercisable in CI / locally without hitting real job boards." },
-{ "id": "req_dedup", "type": "requirement", "label": "Cross-run deduplication", "description": "DB must not store duplicate listings across pipeline runs.", "is_functional": true },
-{ "id": "req_error_recovery", "type": "requirement", "label": "Full error recovery", "description": "A failure in one adapter, one listing, or one resume must not abort the whole run.", "is_functional": true },
-{ "id": "req_tailored_pdf", "type": "requirement", "label": "Tailored resume PDF per job", "description": "Each relevant job gets a uniquely tailored, formatted PDF resume.", "is_functional": true },
-{ "id": "req_filter_relevance", "type": "requirement", "label": "Profile-based relevance filter", "description": "Filter listings against skills, seniority, and role preferences before resume generation.", "is_functional": true },
-{ "id": "req_offline_test_harness", "type": "requirement", "label": "Offline scraper test harness", "description": "Tests use saved HTML/JSON fixtures, never hit live sites.", "is_functional": false },
-{ "id": "req_dynamic_loading", "type": "requirement", "label": "Handle dynamic page loads", "description": "Adapters must wait for client-rendered content (infinite scroll, lazy-loaded cards).", "is_functional": true },
-{ "id": "dec_node_ts", "type": "decision", "label": "Node.js + TypeScript runtime", "description": "Whole pipeline written in TypeScript on Node.", "rationale": "User-selected. Strong Playwright + LLM SDK ecosystem; single-language stack from scraping through PDF generation; first-class async for I/O-bound work.", "alternatives_considered": ["Python (richer scraping/data libs but weaker browser automation parity)", "Go (poor Playwright/headless story)"] },
-{ "id": "dec_playwright", "type": "decision", "label": "Playwright for browser automation", "description": "Use Playwright (Chromium) for all rendered-page scraping, with persistent BrowserContext for session reuse.", "rationale": "Built-in storageState persistence, robust auto-waits, network interception, multi-browser, better stealth posture than Selenium.", "alternatives_considered": ["Puppeteer (narrower API, weaker storage state ergonomics)", "Crawlee (good but adds opinionated framework on top)", "Selenium (older, more detectable)"] },
-{ "id": "dec_llm_hosted", "type": "decision", "label": "Hosted LLM API for resume tailoring", "description": "Use a hosted model (OpenAI or Anthropic) to rewrite resume sections per job.", "rationale": "User-selected. Higher tailoring quality vs local models; no GPU required for overnight host; structured output / JSON mode available.", "alternatives_considered": ["Local Ollama (no quota/cost but lower quality)", "Pure template substitution (deterministic but generic output)"] },
-{ "id": "dec_auth_mixed", "type": "decision", "label": "Mixed auth strategy", "description": "Persisted session reuse for LinkedIn/Wellfound; unauthenticated scraping for public ATSes.", "rationale": "User-selected. Avoids automated login (2FA, captcha) on protected sites while keeping the rest cheap and ToS-cleaner.", "alternatives_considered": ["Fully automated login (brittle, high detection risk)", "Public-only (loses LinkedIn/Wellfound coverage)", "Third-party paid APIs (cost, limited coverage)"] },
-{ "id": "dec_session_storage_state", "type": "decision", "label": "Manual login -> persisted storageState", "description": "User logs in once via a one-shot 'login' command that opens headed Chromium and saves storageState JSON; pipeline reuses it.", "rationale": "Sidesteps 2FA/captcha automation; storageState captures cookies + localStorage; refreshable on demand.", "alternatives_considered": ["Importing cookies from real browser profile (fragile, OS-specific)", "Username/password automation (high block risk)"] },
-{ "id": "dec_per_site_adapters", "type": "decision", "label": "Per-site adapter pattern", "description": "Each board has its own adapter conforming to a common ScraperAdapter interface.", "rationale": "Isolates fragility per source; lets one broken adapter fail without taking down the pipeline; enables fixture-based testing per adapter.", "alternatives_considered": ["Generic config-driven scraper (too brittle for diverse sites)", "Monolithic scraper class (poor isolation)"] },
-{ "id": "comp_orchestrator", "type": "component", "label": "Pipeline orchestrator", "description": "Top-level run loop: scrape -> ingest -> dedup -> filter -> generate -> notify. Owns error boundaries and per-stage retry policy.", "has_tests": false },
-{ "id": "comp_scraper_engine", "type": "component", "label": "Scraper engine + adapter registry", "description": "Manages Playwright contexts, applies stealth tweaks, dispatches per-site adapters, normalises results.", "has_tests": false },
-{ "id": "comp_session_store", "type": "component", "label": "Session storage state manager", "description": "Loads/saves Playwright storageState JSON per site; flags expired sessions for re-login.", "has_tests": false },
-{ "id": "comp_db", "type": "component", "label": "Persistent listings database", "description": "Stores normalised listings, fingerprints for dedup, run metadata, and per-job generation status. Engine TBD (Phase 2).", "has_tests": false },
-{ "id": "comp_filter", "type": "component", "label": "Relevance filter", "description": "Scores listings against the user profile (skills, seniority, role keywords, location) and selects which proceed to resume generation.", "has_tests": false },
-{ "id": "comp_resume_gen", "type": "component", "label": "Resume tailoring + PDF generator", "description": "Calls the LLM to rewrite resume sections for the job, then renders a formatted PDF.", "has_tests": false },
-{ "id": "comp_llm_client", "type": "component", "label": "LLM API client", "description": "Thin wrapper over hosted LLM API with retry, timeout, structured-output validation, and cost tracking.", "has_tests": false },
-{ "id": "comp_test_harness", "type": "component", "label": "Fixture-based test harness", "description": "Loads saved HTML pages and intercepts Playwright network responses to drive adapters offline.", "has_tests": false },
-{ "id": "iface_job_schema", "type": "interface", "label": "Normalised job listing schema", "description": "Common shape every adapter must return.", "contract": "{ source, source_id, url, title, company, location, remote, posted_at, scraped_at, description_html, description_text, salary?, seniority?, raw }" },
-{ "id": "iface_scraper_adapter", "type": "interface", "label": "ScraperAdapter contract", "description": "Each adapter exposes id, requiresAuth, list(query, ctx), enrich(listing, ctx).", "contract": "interface ScraperAdapter { id; requiresAuth: boolean; list(q): AsyncIterable<RawListing>; enrich?(l): Promise<RawListing>; }" },
-{ "id": "iface_user_profile", "type": "interface", "label": "User profile schema", "description": "Skills, seniority bands, target roles, location preferences, deal-breakers, plus master resume content.", "contract": "{ skills[], seniority, target_roles[], locations[], remote_pref, exclude_keywords[], master_resume }" },
-{ "id": "asm_session_longevity", "type": "assumption", "label": "Persisted sessions survive between nights", "description": "Assumes LinkedIn/Wellfound storageState remains valid across days, not just one overnight run.", "confidence": 0.5, "validated": false },
-{ "id": "asm_no_midrun_captcha", "type": "assumption", "label": "Sessions won't trigger captcha mid-run", "description": "Assumes warmed-up sessions can paginate through results without an interactive challenge appearing.", "confidence": 0.5, "validated": false },
-{ "id": "asm_tos_personal_use", "type": "assumption", "label": "User accepts ToS risk of session reuse", "description": "LinkedIn ToS in particular forbids automated access; user is OK with risk to their account.", "confidence": 0.6, "validated": false },
-{ "id": "asm_dom_stable", "type": "assumption", "label": "Site DOMs stable enough for weeks", "description": "Adapters won't need patching more than every few weeks.", "confidence": 0.5, "validated": false },
-{ "id": "asm_llm_budget_ok", "type": "assumption", "label": "Per-night LLM cost is acceptable", "description": "Generating N tailored resumes per night fits a reasonable cost ceiling.", "confidence": 0.7, "validated": false },
-{ "id": "risk_bot_detection", "type": "risk", "label": "Bot detection breaks scraping silently", "description": "A site update can shadow-ban or serve fake/empty content without throwing errors.", "severity": 0.85 },
-{ "id": "risk_session_invalidation", "type": "risk", "label": "Session invalidated overnight", "description": "Auth-walled site logs the session out (password change, new device challenge, idle expiry); pipeline can't recover unattended.", "severity": 0.75 },
-{ "id": "risk_tos_account_action", "type": "risk", "label": "Personal account restricted/banned", "description": "Repeated automated access could trigger account-level enforcement on LinkedIn/Wellfound.", "severity": 0.7 },
-{ "id": "risk_dom_drift", "type": "risk", "label": "Adapter silently produces wrong fields", "description": "Site markup changes; adapter still 'succeeds' but with truncated or wrong data, polluting the DB.", "severity": 0.8 },
-{ "id": "risk_llm_outage", "type": "risk", "label": "LLM API outage or throttling", "description": "Hosted LLM rate-limits or returns 5xx mid-run; resumes fail to generate.", "severity": 0.5 },
-{ "id": "risk_silent_overnight_failure", "type": "risk", "label": "Silent overnight failure", "description": "Pipeline crashes or no-ops at 02:00; user discovers it next morning with no output and no signal.", "severity": 0.75 }
-],
-"edges": [
-{ "type": "motivated_by", "source_id": "dec_playwright", "target_id": "obj_multi_board_coverage" },
-{ "type": "motivated_by", "source_id": "dec_auth_mixed", "target_id": "obj_multi_board_coverage" },
-{ "type": "motivated_by", "source_id": "dec_session_storage_state", "target_id": "obj_overnight_run" },
-{ "type": "motivated_by", "source_id": "dec_per_site_adapters", "target_id": "obj_offline_testable" },
-{ "type": "motivated_by", "source_id": "dec_per_site_adapters", "target_id": "obj_multi_board_coverage" },
-{ "type": "motivated_by", "source_id": "dec_llm_hosted", "target_id": "req_tailored_pdf" },
-{ "type": "implements", "source_id": "comp_db", "target_id": "req_dedup" },
-{ "type": "implements", "source_id": "comp_orchestrator", "target_id": "req_error_recovery" },
-{ "type": "implements", "source_id": "comp_resume_gen", "target_id": "req_tailored_pdf" },
-{ "type": "implements", "source_id": "comp_filter", "target_id": "req_filter_relevance" },
-{ "type": "implements", "source_id": "comp_test_harness", "target_id": "req_offline_test_harness" },
-{ "type": "implements", "source_id": "comp_scraper_engine", "target_id": "req_dynamic_loading" },
-{ "type": "exposes", "source_id": "comp_scraper_engine", "target_id": "iface_scraper_adapter" },
-{ "type": "exposes", "source_id": "comp_scraper_engine", "target_id": "iface_job_schema" },
-{ "type": "consumes", "source_id": "comp_db", "target_id": "iface_job_schema" },
-{ "type": "consumes", "source_id": "comp_filter", "target_id": "iface_job_schema" },
-{ "type": "consumes", "source_id": "comp_filter", "target_id": "iface_user_profile" },
-{ "type": "consumes", "source_id": "comp_resume_gen", "target_id": "iface_user_profile" },
-{ "type": "consumes", "source_id": "comp_resume_gen", "target_id": "iface_job_schema" },
-{ "type": "depends_on", "source_id": "comp_orchestrator", "target_id": "comp_scraper_engine" },
-{ "type": "depends_on", "source_id": "comp_orchestrator", "target_id": "comp_db" },
-{ "type": "depends_on", "source_id": "comp_orchestrator", "target_id": "comp_filter" },
-{ "type": "depends_on", "source_id": "comp_orchestrator", "target_id": "comp_resume_gen" },
-{ "type": "depends_on", "source_id": "comp_scraper_engine", "target_id": "comp_session_store" },
-{ "type": "depends_on", "source_id": "comp_resume_gen", "target_id": "comp_llm_client" },
-{ "type": "depends_on", "source_id": "comp_test_harness", "target_id": "comp_scraper_engine" },
-{ "type": "assumes", "source_id": "dec_session_storage_state", "target_id": "asm_session_longevity" },
-{ "type": "assumes", "source_id": "dec_session_storage_state", "target_id": "asm_no_midrun_captcha" },
-{ "type": "assumes", "source_id": "dec_session_storage_state", "target_id": "asm_tos_personal_use" },
-{ "type": "assumes", "source_id": "dec_per_site_adapters", "target_id": "asm_dom_stable" },
-{ "type": "assumes", "source_id": "dec_llm_hosted", "target_id": "asm_llm_budget_ok" },
-{ "type": "conflicts_with", "source_id": "risk_bot_detection", "target_id": "dec_playwright" },
-{ "type": "conflicts_with", "source_id": "risk_dom_drift", "target_id": "dec_per_site_adapters" },
-{ "type": "conflicts_with", "source_id": "risk_session_invalidation", "target_id": "dec_session_storage_state" },
-{ "type": "conflicts_with", "source_id": "risk_tos_account_action", "target_id": "dec_session_storage_state" },
-{ "type": "conflicts_with", "source_id": "risk_llm_outage", "target_id": "dec_llm_hosted" },
-{ "type": "conflicts_with", "source_id": "risk_silent_overnight_failure", "target_id": "obj_overnight_run" },
-{ "type": "invalidates", "source_id": "risk_session_invalidation", "target_id": "asm_session_longevity" },
-{ "type": "invalidates", "source_id": "risk_bot_detection", "target_id": "asm_no_midrun_captcha" },
-{ "type": "invalidates", "source_id": "risk_dom_drift", "target_id": "asm_dom_stable" }
-]
+  "nodes": [
+    {
+      "id": "obj_overnight_prep",
+      "type": "objective",
+      "label": "Overnight job prep pipeline",
+      "description": "Unattended discovery and ranking of roles, persistent storage with deduplication, tailored resumes and application packets; human performs final submission."
+    },
+    {
+      "id": "req_multi_source",
+      "type": "requirement",
+      "label": "Multi-board ingestion",
+      "description": "Collect listings from multiple job boards with site-specific behavior.",
+      "is_functional": true
+    },
+    {
+      "id": "req_auth_sites",
+      "type": "requirement",
+      "label": "Authenticated sources",
+      "description": "Ingest from boards that require login sessions (e.g., LinkedIn, Wellfound).",
+      "is_functional": true
+    },
+    {
+      "id": "req_dynamic_js",
+      "type": "requirement",
+      "label": "Dynamic pages and bot friction",
+      "description": "Handle JS-rendered listings and practical bot-detection mitigations within ethical/legal constraints chosen by the operator.",
+      "is_functional": true
+    },
+    {
+      "id": "req_dedup_persist",
+      "type": "requirement",
+      "label": "Persistent deduplicated store",
+      "description": "Store normalized listings in a database and dedupe across runs using stable keys.",
+      "is_functional": true
+    },
+    {
+      "id": "req_profile_match",
+      "type": "requirement",
+      "label": "Profile relevance filtering",
+      "description": "Filter jobs against skills, seniority, and role preferences with explainable scores or reasons.",
+      "is_functional": true
+    },
+    {
+      "id": "req_tailored_resume_pdf",
+      "type": "requirement",
+      "label": "Tailored resume PDFs",
+      "description": "For each relevant job, generate a formatted PDF resume variant aligned to that posting.",
+      "is_functional": true
+    },
+    {
+      "id": "req_app_packet",
+      "type": "requirement",
+      "label": "Application packet artifacts",
+      "description": "Produce per-job artifacts such as cover letter text and answers/cheatsheet for forms, suitable for human submission.",
+      "is_functional": true
+    },
+    {
+      "id": "req_unattended_recovery",
+      "type": "requirement",
+      "label": "Unattended execution with recovery",
+      "description": "Run overnight with retries, resumability, checkpointing, and summarized error reporting without manual babysitting.",
+      "is_functional": true
+    },
+    {
+      "id": "req_offline_tests",
+      "type": "requirement",
+      "label": "Offline scraping validation",
+      "description": "Automated tests validate parsing/normalization using fixtures, not live network calls.",
+      "is_functional": true
+    },
+    {
+      "id": "dec_scope_human_submit",
+      "type": "decision",
+      "label": "Human submits applications",
+      "description": "Automate discovery, tailoring, and packet generation; stop before autonomous submission.",
+      "rationale": "Materially reduces CAPTCHA/phone-verification surfaces and keeps the automation posture closer to assistive tooling.",
+      "alternatives_considered": [
+        "Fully automated submission where possible",
+        "Discovery + resume only (no cover letter/answers)"
+      ]
+    },
+    {
+      "id": "dec_auth_playwright_storage",
+      "type": "decision",
+      "label": "Playwright sessions via persistent storage",
+      "description": "Use Playwright persistent context and/or saved storage state refreshed periodically by a login helper.",
+      "rationale": "Matches authenticated web apps better than naive unauthenticated scraping; can be scripted and audited.",
+      "alternatives_considered": [
+        "Manual cookie injection only",
+        "Official APIs/alerts first with scraping fallback"
+      ]
+    },
+    {
+      "id": "dec_runtime_local_docker",
+      "type": "decision",
+      "label": "Local Docker packaging",
+      "description": "Package the pipeline for reproducible runs on a personal machine using Docker.",
+      "rationale": "Locks dependencies and simplifies onboarding; pairs well with volume-mounted state and logs.",
+      "alternatives_considered": [
+        "Native venv on host",
+        "Remote cloud runner"
+      ]
+    },
+    {
+      "id": "dec_stack_python_playwright",
+      "type": "decision",
+      "label": "Python orchestration + Playwright",
+      "description": "Implement the pipeline in Python with Playwright for browser automation and pytest for tests.",
+      "rationale": "Strong ecosystem for scraping workflows, PDF generation, and data tooling; Playwright is a pragmatic dynamic-site choice.",
+      "alternatives_considered": [
+        "Node.js with Playwright",
+        "Rust + headless browser automation"
+      ]
+    },
+    {
+      "id": "dec_store_sqlite",
+      "type": "decision",
+      "label": "SQLite as primary database",
+      "description": "Use SQLite (via SQLAlchemy or similar) on a mounted volume for listings and run metadata.",
+      "rationale": "Single-operator local pipeline with minimal ops overhead; easy backups via file copy.",
+      "alternatives_considered": [
+        "PostgreSQL in Docker",
+        "DuckDB"
+      ]
+    },
+    {
+      "id": "iface_normalized_job",
+      "type": "interface",
+      "label": "Normalized job record",
+      "description": "Canonical fields and provenance for a listing after adapter parsing.",
+      "contract": "{source, source_job_id?, canonical_url, title, company, location?, remote?, description_text, posted_at?, scraped_at, raw_ref?, content_hash}"
+    },
+    {
+      "id": "iface_user_profile",
+      "type": "interface",
+      "label": "User profile model",
+      "description": "Structured preferences used for filtering and tailoring outputs.",
+      "contract": "{skills[], seniority, role_titles[], industries[], locations[], must_have[], avoid[], compensation?, narrative?}"
+    },
+    {
+      "id": "comp_orchestrator",
+      "type": "component",
+      "label": "Pipeline orchestrator",
+      "description": "Schedules stages, manages retries, checkpoints, and aggregates run reports.",
+      "file_refs": [],
+      "has_tests": false
+    },
+    {
+      "id": "comp_scraper_adapters",
+      "type": "component",
+      "label": "Site scraper adapters",
+      "description": "Per-board modules implementing discovery/pagination and mapping to the normalized job interface.",
+      "file_refs": [],
+      "has_tests": false
+    },
+    {
+      "id": "comp_store",
+      "type": "component",
+      "label": "Persistence layer",
+      "description": "Migrations, dedupe upserts, and querying for downstream filtering and artifact generation.",
+      "file_refs": [],
+      "has_tests": false
+    },
+    {
+      "id": "comp_relevance_engine",
+      "type": "component",
+      "label": "Relevance scoring",
+      "description": "Implements filtering and ranking against the user profile with explainability metadata.",
+      "file_refs": [],
+      "has_tests": false
+    },
+    {
+      "id": "comp_pdf_factory",
+      "type": "component",
+      "label": "Resume PDF generator",
+      "description": "Renders tailored resume PDFs from templates plus per-job emphasis rules.",
+      "file_refs": [],
+      "has_tests": false
+    },
+    {
+      "id": "comp_packet_assembler",
+      "type": "component",
+      "label": "Application packet assembler",
+      "description": "Generates cover letter drafts and structured answer snippets/files per job.",
+      "file_refs": [],
+      "has_tests": false
+    },
+    {
+      "id": "risk_bot_and_tos",
+      "type": "risk",
+      "label": "Bot detection and platform policy",
+      "description": "Sites may block automation or change markup; scraping may conflict with terms and account safety.",
+      "severity": 0.9
+    },
+    {
+      "id": "risk_docker_mac_auth",
+      "type": "risk",
+      "label": "Docker-on-Mac auth ergonomics",
+      "description": "Interactive login and realistic browser fingerprints may be harder inside containers on macOS than on host-mounted profiles.",
+      "severity": 0.72
+    },
+    {
+      "id": "risk_session_instability",
+      "type": "risk",
+      "label": "Session expiry mid-run",
+      "description": "Long unattended runs may hit forced re-auth, security challenges, or token rotation.",
+      "severity": 0.68
+    },
+    {
+      "id": "asm_operator_tos_acceptance",
+      "type": "assumption",
+      "label": "Operator accepts platform risk",
+      "description": "Assumes the operator knowingly accepts account restriction risk and legal/ToS uncertainty for chosen boards.",
+      "confidence": 0.45,
+      "validated": false
+    },
+    {
+      "id": "asm_profile_volume_mount",
+      "type": "assumption",
+      "label": "Persistent profile/state via volumes",
+      "description": "Assumes a workable approach exists to share Playwright storage state between a refresh helper and batch scraper (often host-mounted volume).",
+      "confidence": 0.55,
+      "validated": false
+    },
+    {
+      "id": "asm_session_duration",
+      "type": "assumption",
+      "label": "Sessions last through typical runs",
+      "description": "Assumes refreshed storage state remains valid for an overnight run window under normal platform behavior.",
+      "confidence": 0.62,
+      "validated": false
+    },
+    {
+      "id": "tst_adapter_fixture_suite",
+      "type": "test",
+      "label": "Adapter parsing fixture tests",
+      "description": "pytest tests load saved HTML/JSON fixtures and assert normalized job outputs and dedupe keys.",
+      "test_type": "unit",
+      "status": "planned"
+    }
+  ],
+  "edges": [
+    { "type": "motivated_by", "source_id": "dec_scope_human_submit", "target_id": "obj_overnight_prep" },
+    { "type": "motivated_by", "source_id": "dec_auth_playwright_storage", "target_id": "obj_overnight_prep" },
+    { "type": "motivated_by", "source_id": "dec_runtime_local_docker", "target_id": "obj_overnight_prep" },
+    { "type": "motivated_by", "source_id": "dec_stack_python_playwright", "target_id": "obj_overnight_prep" },
+    { "type": "motivated_by", "source_id": "dec_store_sqlite", "target_id": "obj_overnight_prep" },
+    { "type": "assumes", "source_id": "dec_auth_playwright_storage", "target_id": "asm_profile_volume_mount" },
+    { "type": "assumes", "source_id": "dec_auth_playwright_storage", "target_id": "asm_session_duration" },
+    { "type": "assumes", "source_id": "dec_stack_python_playwright", "target_id": "asm_operator_tos_acceptance" },
+    { "type": "implements", "source_id": "comp_scraper_adapters", "target_id": "req_multi_source" },
+    { "type": "implements", "source_id": "comp_scraper_adapters", "target_id": "req_auth_sites" },
+    { "type": "implements", "source_id": "comp_scraper_adapters", "target_id": "req_dynamic_js" },
+    { "type": "implements", "source_id": "comp_store", "target_id": "req_dedup_persist" },
+    { "type": "implements", "source_id": "comp_relevance_engine", "target_id": "req_profile_match" },
+    { "type": "implements", "source_id": "comp_pdf_factory", "target_id": "req_tailored_resume_pdf" },
+    { "type": "implements", "source_id": "comp_packet_assembler", "target_id": "req_app_packet" },
+    { "type": "implements", "source_id": "comp_orchestrator", "target_id": "req_unattended_recovery" },
+    { "type": "implements", "source_id": "tst_adapter_fixture_suite", "target_id": "req_offline_tests" },
+    { "type": "exposes", "source_id": "comp_scraper_adapters", "target_id": "iface_normalized_job" },
+    { "type": "consumes", "source_id": "comp_store", "target_id": "iface_normalized_job" },
+    { "type": "consumes", "source_id": "comp_relevance_engine", "target_id": "iface_normalized_job" },
+    { "type": "consumes", "source_id": "comp_relevance_engine", "target_id": "iface_user_profile" },
+    { "type": "consumes", "source_id": "comp_pdf_factory", "target_id": "iface_user_profile" },
+    { "type": "consumes", "source_id": "comp_packet_assembler", "target_id": "iface_user_profile" },
+    { "type": "depends_on", "source_id": "comp_orchestrator", "target_id": "comp_scraper_adapters" },
+    { "type": "depends_on", "source_id": "comp_orchestrator", "target_id": "comp_store" },
+    { "type": "depends_on", "source_id": "comp_orchestrator", "target_id": "comp_relevance_engine" },
+    { "type": "depends_on", "source_id": "comp_orchestrator", "target_id": "comp_pdf_factory" },
+    { "type": "depends_on", "source_id": "comp_orchestrator", "target_id": "comp_packet_assembler" },
+    { "type": "depends_on", "source_id": "comp_pdf_factory", "target_id": "comp_store" },
+    { "type": "depends_on", "source_id": "comp_packet_assembler", "target_id": "comp_store" },
+    { "type": "conflicts_with", "source_id": "risk_bot_and_tos", "target_id": "req_auth_sites" },
+    { "type": "conflicts_with", "source_id": "risk_bot_and_tos", "target_id": "req_dynamic_js" },
+    { "type": "conflicts_with", "source_id": "risk_docker_mac_auth", "target_id": "dec_runtime_local_docker" },
+    { "type": "invalidates", "source_id": "risk_session_instability", "target_id": "asm_session_duration" },
+    { "type": "verifies", "source_id": "tst_adapter_fixture_suite", "target_id": "comp_scraper_adapters" },
+    { "type": "verifies", "source_id": "tst_adapter_fixture_suite", "target_id": "iface_normalized_job" },
+    { "type": "guards_against", "source_id": "tst_adapter_fixture_suite", "target_id": "risk_bot_and_tos" }
+  ]
 }
 [/GRAPH UPDATE]
-Gaps I want to close before Phase 2 (component design):
-The two biggest holes are (a) risk_silent_overnight_failure (0.75) has no mitigation yet — and how we mitigate it depends entirely on where this runs and how you want to be alerted, and (b) comp_filter and comp_resume_gen are sketched but their actual contract depends on whether you already have a structured profile + master resume.
+Graph gaps this turn
+Low-confidence assumptions (asm_operator_tos_acceptance, asm_profile_volume_mount): need your explicit stance and preferred login/storage layout.
+High-severity risk risk_bot_and_tos: fixture tests only guard parsing drift, not live blocks—need agreed mitigations (rate limits, backoff, circuit breakers, “degraded mode”).
+Decision pressure-test: dec_stack_python_playwright is provisional until you confirm language preference and whether LLM-based tailoring is in scope (affects cost, determinism, and testing).
 
-Where does the overnight pipeline run, and how do you want to be notified of run outcomes? (Drives scheduler choice, secret storage, and how we mitigate silent overnight failure.)
-Docker container on local machine, log file + Slack/Discord webhook on completion
-What's the starting state of your user profile and master resume? (Determines whether comp_filter and comp_resume_gen need authoring tools or can assume structured input.)
-I have a finished PDF/DOCX resume but nothing structured - the system needs to parse it once into a master profile
+What is your acceptable posture toward authenticated scraping/automation on
+LinkedIn/Wellfound-like sites? (This does not change whether risks exist; it changes how aggressively we design mitigations and logging.)
+Conservative: minimize automation signals, strict rate limits, prefer manual refresh and smaller batches
+Which auth refresh shape do you want as the default? (We can still support both, but one should be canonical.)
+Not sure - pick the most reliable for macOS
+Docker
+How should resume/cover-letter tailoring be produced?
+LLM-assisted rewriting with strict schemas and offline tests for formatting constraints
 
-Locked in: Docker container locally + Slack/Discord webhook, and starting from a PDF/DOCX resume that needs a one-shot parse into structured form. Building Phase 2 (components, interfaces, dependencies) now.
+Locking in conservative automation, canonical macOS-Docker auth via host helper + shared volume (most reliable default), and optional LLM tailoring with strict structured outputs. Updating the cumulative graph for end of Phase 1 / start of Phase 2, then asking focused Phase 2 questions.
+[GRAPH UPDATE]
+[/GRAPH UPDATE]
+Graph review (this phase)
+guards_against from decision nodes: The schema shows guards_against from test → risk. I used dec_conservative_automation and dec_auth_host_volume_canonical as guards—conceptually they’re mitigations, not tests. In the next graph revision I’ll either add explicit mitigation components (rate limiter, session health check) with implements-style links, or represent mitigation as risk → decision edges if you want strict edge typing. For the final plan prose, mitigations will be explicit.
+Low-confidence assumptions still open: asm_host_volume_auth (0.74), asm_session_duration (0.66), asm_llm_available_when_enabled (0.63)—worth validating via your environment and provider choice.
+
+Which LLM integration should be the default for optional tailoring? (You can add more later; this choice drives SDK deps and secrets layout.)
+playwright to simulate Ul on chatgpt. have option for logging in once if auth json not present
+What is the canonical source resume format the PDF generator should treat as ground truth?
+DOCX template uploaded into a mounted volume
+Pick an MVP board set for v1 adapters (others stubbed behind interfaces).
+option B but for job boards, have LLM assisted dynamic web scraping as different job boards will have different layouts. use playwright for this too
+
+Recording a major architecture shift: tailoring via Playwright-driven ChatGPT web UI (with one-time login when auth state is missing), canonical resume as a mounted DOCX template, MVP boards: LinkedIn + Wellfound + one public ATS-style board, and LLM-assisted adaptive scraping for heterogeneous layouts—still using Playwright for execution.
+Pushback: Automating the ChatGPT website is typically more brittle and policy-sensitive than calling an API with the same structured-output discipline. The graph encodes that as a high-severity risk; we should still design a deterministic fallback path (templates/rules) so overnight runs don’t hard-fail when the UI changes.
 [GRAPH UPDATE]
 {
-"nodes": [
-{ "id": "obj_overnight_run", "type": "objective", "label": "Unattended overnight execution", "description": "Pipeline runs start-to-finish without human intervention, recovering from transient errors." },
-{ "id": "obj_multi_board_coverage", "type": "objective", "label": "Coverage across many job boards", "description": "Aggregate listings from public ATSes and auth-walled platforms in a single run." },
-{ "id": "obj_only_relevant", "type": "objective", "label": "Only act on relevant jobs", "description": "Avoid wasting LLM tokens and PDF generation on jobs that don't match the user profile." },
-{ "id": "obj_offline_testable", "type": "objective", "label": "Testable without live sites", "description": "Scraper logic must be exercisable in CI / locally without hitting real job boards." },
-{ "id": "req_dedup", "type": "requirement", "label": "Cross-run deduplication", "description": "DB must not store duplicate listings across pipeline runs.", "is_functional": true },
-{ "id": "req_error_recovery", "type": "requirement", "label": "Full error recovery", "description": "A failure in one adapter, one listing, or one resume must not abort the whole run.", "is_functional": true },
-{ "id": "req_tailored_pdf", "type": "requirement", "label": "Tailored resume PDF per job", "description": "Each relevant job gets a uniquely tailored, formatted PDF resume.", "is_functional": true },
-{ "id": "req_filter_relevance", "type": "requirement", "label": "Profile-based relevance filter", "description": "Filter listings against skills, seniority, and role preferences before resume generation.", "is_functional": true },
-{ "id": "req_offline_test_harness", "type": "requirement", "label": "Offline scraper test harness", "description": "Tests use saved HTML/JSON fixtures, never hit live sites.", "is_functional": false },
-{ "id": "req_dynamic_loading", "type": "requirement", "label": "Handle dynamic page loads", "description": "Adapters must wait for client-rendered content (infinite scroll, lazy-loaded cards).", "is_functional": true },
-{ "id": "req_run_visibility", "type": "requirement", "label": "Run outcome observable", "description": "Every run produces a structured summary that reaches the user without them checking logs.", "is_functional": false },
-{ "id": "req_no_resume_fabrication", "type": "requirement", "label": "Resumes must not fabricate experience", "description": "LLM may rewrite/reorder/emphasise but must never introduce skills, employers, dates, or accomplishments not in the master resume.", "is_functional": false },
-{ "id": "dec_node_ts", "type": "decision", "label": "Node.js + TypeScript runtime", "description": "Whole pipeline written in TypeScript on Node.", "rationale": "User-selected. Strong Playwright + LLM SDK ecosystem; single-language stack from scraping through PDF generation; first-class async for I/O-bound work.", "alternatives_considered": ["Python (richer scraping/data libs but weaker browser automation parity)", "Go (poor Playwright/headless story)"] },
-{ "id": "dec_playwright", "type": "decision", "label": "Playwright for browser automation", "description": "Playwright (Chromium) for all rendered-page scraping with persistent BrowserContext for session reuse.", "rationale": "Built-in storageState, robust auto-waits, network interception, multi-browser, better stealth posture than Selenium.", "alternatives_considered": ["Puppeteer", "Crawlee", "Selenium"] },
-{ "id": "dec_llm_hosted", "type": "decision", "label": "Hosted LLM API for resume tailoring", "description": "Hosted model (OpenAI/Anthropic) rewrites resume sections per job.", "rationale": "User-selected. Higher tailoring quality vs local models; structured-output / JSON mode available.", "alternatives_considered": ["Local Ollama", "Pure template substitution"] },
-{ "id": "dec_auth_mixed", "type": "decision", "label": "Mixed auth strategy", "description": "Persisted sessions for LinkedIn/Wellfound; unauthenticated for public ATSes.", "rationale": "User-selected. Avoids automated login on protected sites.", "alternatives_considered": ["Full auto-login", "Public-only", "Third-party APIs"] },
-{ "id": "dec_session_storage_state", "type": "decision", "label": "Manual login -> persisted storageState", "description": "One-shot 'login' CLI command opens headed Chromium, user logs in, storageState JSON saved per site; pipeline reuses it.", "rationale": "Sidesteps 2FA/captcha automation; refreshable on demand.", "alternatives_considered": ["Cookie import from real browser profile", "Username/password automation"] },
-{ "id": "dec_per_site_adapters", "type": "decision", "label": "Per-site adapter pattern", "description": "Each board has its own adapter conforming to a common ScraperAdapter interface.", "rationale": "Per-source isolation; one broken adapter cannot fail the run; enables fixture-based testing.", "alternatives_considered": ["Generic config-driven scraper", "Monolithic scraper"] },
-{ "id": "dec_docker", "type": "decision", "label": "Docker container deployment", "description": "Pipeline ships as a Docker image based on mcr.microsoft.com/playwright; scheduled on the host via launchd/cron; volumes for DB, sessions, outputs.", "rationale": "Reproducible Playwright environment (browsers + OS deps preinstalled); isolates from host Node version; easy to relocate.", "alternatives_considered": ["Bare Node + npx playwright install", "systemd service", "GitHub Actions cron"] },
-{ "id": "dec_webhook_notify", "type": "decision", "label": "Webhook notification (Slack/Discord)", "description": "End-of-run summary (and per-stage failures above a threshold) posted to a webhook URL.", "rationale": "Push-based; no SMTP setup; renders nicely; addresses silent-failure risk.", "alternatives_considered": ["Email via SMTP", "Pushover/ntfy", "Local desktop notification only"] },
-{ "id": "dec_jsonresume", "type": "decision", "label": "JSON Resume schema as canonical profile", "description": "Master resume + extension fields (target_roles, seniority, exclude_keywords, locations) stored as a single JSON Resume document.", "rationale": "Open standard, large theme ecosystem, easy to validate, schema documents itself.", "alternatives_considered": ["Custom schema", "LaTeX source as ground truth", "Markdown + frontmatter"] },
-{ "id": "dec_resume_bootstrap_once", "type": "decision", "label": "One-shot LLM-assisted PDF -> JSON Resume bootstrap", "description": "Separate CLI command extracts text from user's existing PDF/DOCX, prompts the LLM to emit JSON Resume, then opens it for manual review/edit before commit.", "rationale": "User has no structured source today; one-time cost; manual-review checkpoint prevents bad data from polluting all future runs.", "alternatives_considered": ["Parse every run", "Manual transcription only", "Pure regex/heuristic parsing"] },
-{ "id": "dec_pdf_via_html", "type": "decision", "label": "PDF rendered via HTML template + Playwright print", "description": "Tailored JSON Resume rendered through a Handlebars/EJS HTML template, then printed to PDF by Chromium (Playwright page.pdf).", "rationale": "Reuses Playwright we already have; full CSS control; deterministic; works with JSON Resume themes if desired.", "alternatives_considered": ["@react-pdf/renderer (different template lang)", "LaTeX (heavy toolchain in container)", "Pandoc/Word"] },
-{ "id": "dec_sqlite", "type": "decision", "label": "SQLite via better-sqlite3 + Drizzle ORM", "description": "Embedded SQLite on a Docker volume; Drizzle for typed schema and migrations.", "rationale": "Single-machine, single-writer; zero ops; survives container restarts via volume; Drizzle gives TS types and migrations.", "alternatives_considered": ["Postgres (overkill)", "DuckDB (analytical, write story weaker)", "Plain JSON files (no indexes / dedup queries)"] },
-{ "id": "dec_dedup_multikey", "type": "decision", "label": "Multi-key dedup fingerprint", "description": "Primary key: (source, source_id). Secondary: SHA-256 of normalised (company + title + normalised_url). Tertiary: SHA-256 of normalised description text for cross-board dupes.", "rationale": "Same job often appears on multiple boards under different IDs; URL/title alone misses re-posts.", "alternatives_considered": ["URL-only", "(source, source_id) only", "Title+company only"] },
-{ "id": "dec_llm_grounded_rewrite", "type": "decision", "label": "LLM operates in grounded-rewrite mode only", "description": "LLM is given the full master resume + job description and prompted to (a) reorder/select bullets, (b) rewrite phrasing, (c) emphasise matching skills. It MAY NOT add new employers, dates, titles, or skills. Output is validated against the master profile (whitelist of allowed fields/values).", "rationale": "Eliminates the highest-impact failure mode (fabrication that user can't catch overnight).", "alternatives_considered": ["Free generation", "Few-shot only", "No grounding constraints"] }
-],
-"edges": [
-{ "type": "motivated_by", "source_id": "dec_playwright", "target_id": "obj_multi_board_coverage" },
-{ "type": "motivated_by", "source_id": "dec_auth_mixed", "target_id": "obj_multi_board_coverage" },
-{ "type": "motivated_by", "source_id": "dec_session_storage_state", "target_id": "obj_overnight_run" },
-{ "type": "motivated_by", "source_id": "dec_per_site_adapters", "target_id": "obj_offline_testable" },
-{ "type": "motivated_by", "source_id": "dec_per_site_adapters", "target_id": "obj_multi_board_coverage" },
-{ "type": "motivated_by", "source_id": "dec_llm_hosted", "target_id": "req_tailored_pdf" },
-{ "type": "motivated_by", "source_id": "dec_docker", "target_id": "obj_overnight_run" },
-{ "type": "motivated_by", "source_id": "dec_webhook_notify", "target_id": "obj_overnight_run" },
-{ "type": "motivated_by", "source_id": "dec_jsonresume", "target_id": "req_tailored_pdf" },
-{ "type": "motivated_by", "source_id": "dec_resume_bootstrap_once", "target_id": "req_tailored_pdf" },
-{ "type": "motivated_by", "source_id": "dec_llm_grounded_rewrite", "target_id": "req_no_resume_fabrication" },
-{ "type": "implements", "source_id": "comp_db", "target_id": "req_dedup" },
-{ "type": "implements", "source_id": "comp_orchestrator", "target_id": "req_error_recovery" },
-{ "type": "implements", "source_id": "comp_resume_gen", "target_id": "req_tailored_pdf" },
-{ "type": "implements", "source_id": "comp_filter", "target_id": "req_filter_relevance" },
-{ "type": "implements", "source_id": "comp_test_harness", "target_id": "req_offline_test_harness" },
-{ "type": "implements", "source_id": "comp_scraper_engine", "target_id": "req_dynamic_loading" },
-{ "type": "implements", "source_id": "comp_notifier", "target_id": "req_run_visibility" },
-{ "type": "implements", "source_id": "comp_resume_gen", "target_id": "req_no_resume_fabrication" },
-{ "type": "exposes", "source_id": "comp_scraper_engine", "target_id": "iface_scraper_adapter" },
-{ "type": "exposes", "source_id": "comp_scraper_engine", "target_id": "iface_job_schema" },
-{ "type": "exposes", "source_id": "comp_db", "target_id": "iface_db_repo" },
-{ "type": "exposes", "source_id": "comp_resume_gen", "target_id": "iface_resume_render_input" },
-{ "type": "exposes", "source_id": "comp_notifier", "target_id": "iface_run_summary" },
-{ "type": "consumes", "source_id": "comp_db", "target_id": "iface_job_schema" },
-{ "type": "consumes", "source_id": "comp_filter", "target_id": "iface_job_schema" },
-{ "type": "consumes", "source_id": "comp_filter", "target_id": "iface_user_profile" },
-{ "type": "consumes", "source_id": "comp_resume_gen", "target_id": "iface_user_profile" },
-{ "type": "consumes", "source_id": "comp_resume_gen", "target_id": "iface_job_schema" },
-{ "type": "consumes", "source_id": "comp_pdf_renderer", "target_id": "iface_resume_render_input" },
-{ "type": "consumes", "source_id": "comp_notifier", "target_id": "iface_run_summary" },
-{ "type": "depends_on", "source_id": "comp_orchestrator", "target_id": "comp_scraper_engine" },
-{ "type": "depends_on", "source_id": "comp_orchestrator", "target_id": "comp_db" },
-{ "type": "depends_on", "source_id": "comp_orchestrator", "target_id": "comp_filter" },
-{ "type": "depends_on", "source_id": "comp_orchestrator", "target_id": "comp_resume_gen" },
-{ "type": "depends_on", "source_id": "comp_orchestrator", "target_id": "comp_notifier" },
-{ "type": "depends_on", "source_id": "comp_scraper_engine", "target_id": "comp_session_store" },
-{ "type": "depends_on", "source_id": "comp_resume_gen", "target_id": "comp_llm_client" },
-{ "type": "depends_on", "source_id": "comp_resume_gen", "target_id": "comp_pdf_renderer" },
-{ "type": "depends_on", "source_id": "comp_resume_gen", "target_id": "comp_db" },
-{ "type": "depends_on", "source_id": "comp_test_harness", "target_id": "comp_scraper_engine" },
-{ "type": "depends_on", "source_id": "comp_profile_bootstrap", "target_id": "comp_llm_client" },
-{ "type": "depends_on", "source_id": "comp_docker_image", "target_id": "comp_orchestrator" },
-{ "type": "assumes", "source_id": "dec_session_storage_state", "target_id": "asm_session_longevity" },
-{ "type": "assumes", "source_id": "dec_session_storage_state", "target_id": "asm_no_midrun_captcha" },
-{ "type": "assumes", "source_id": "dec_session_storage_state", "target_id": "asm_tos_personal_use" },
-{ "type": "assumes", "source_id": "dec_per_site_adapters", "target_id": "asm_dom_stable" },
-{ "type": "assumes", "source_id": "dec_llm_hosted", "target_id": "asm_llm_budget_ok" },
-{ "type": "assumes", "source_id": "dec_resume_bootstrap_once", "target_id": "asm_resume_parse_accuracy" },
-{ "type": "assumes", "source_id": "dec_pdf_via_html", "target_id": "asm_html_template_renders" },
-{ "type": "assumes", "source_id": "dec_docker", "target_id": "asm_docker_playwright_apple_silicon" },
-{ "type": "conflicts_with", "source_id": "risk_bot_detection", "target_id": "dec_playwright" },
-{ "type": "conflicts_with", "source_id": "risk_dom_drift", "target_id": "dec_per_site_adapters" },
-{ "type": "conflicts_with", "source_id": "risk_session_invalidation", "target_id": "dec_session_storage_state" },
-{ "type": "conflicts_with", "source_id": "risk_tos_account_action", "target_id": "dec_session_storage_state" },
-{ "type": "conflicts_with", "source_id": "risk_llm_outage", "target_id": "dec_llm_hosted" },
-{ "type": "conflicts_with", "source_id": "risk_silent_overnight_failure", "target_id": "obj_overnight_run" },
-{ "type": "conflicts_with", "source_id": "risk_llm_hallucinates_resume", "target_id": "req_no_resume_fabrication" },
-{ "type": "conflicts_with", "source_id": "risk_dedup_misses", "target_id": "req_dedup" },
-{ "type": "conflicts_with", "source_id": "risk_run_exceeds_window", "target_id": "obj_overnight_run" },
-{ "type": "invalidates", "source_id": "risk_session_invalidation", "target_id": "asm_session_longevity" },
-{ "type": "invalidates", "source_id": "risk_bot_detection", "target_id": "asm_no_midrun_captcha" },
-{ "type": "invalidates", "source_id": "risk_dom_drift", "target_id": "asm_dom_stable" },
-{ "type": "invalidates", "source_id": "risk_llm_hallucinates_resume", "target_id": "asm_resume_parse_accuracy" }
-]
+  "nodes": [
+    {
+      "id": "obj_overnight_prep",
+      "type": "objective",
+      "label": "Overnight job prep pipeline",
+      "description": "Unattended discovery and ranking of roles, persistent storage with deduplication, tailored resumes and application packets; human performs final submission."
+    },
+    {
+      "id": "req_multi_source",
+      "type": "requirement",
+      "label": "Multi-board ingestion",
+      "description": "Collect listings from multiple job boards with site-specific behavior.",
+      "is_functional": true
+    },
+    {
+      "id": "req_auth_sites",
+      "type": "requirement",
+      "label": "Authenticated sources",
+      "description": "Ingest from boards that require login sessions (e.g., LinkedIn, Wellfound).",
+      "is_functional": true
+    },
+    {
+      "id": "req_dynamic_js",
+      "type": "requirement",
+      "label": "Dynamic pages and bot friction",
+      "description": "Handle JS-rendered listings and practical bot-detection mitigations within operator-chosen constraints.",
+      "is_functional": true
+    },
+    {
+      "id": "req_dedup_persist",
+      "type": "requirement",
+      "label": "Persistent deduplicated store",
+      "description": "Store normalized listings in a database and dedupe across runs using stable keys.",
+      "is_functional": true
+    },
+    {
+      "id": "req_profile_match",
+      "type": "requirement",
+      "label": "Profile relevance filtering",
+      "description": "Filter jobs against skills, seniority, and role preferences with explainable scores or reasons.",
+      "is_functional": true
+    },
+    {
+      "id": "req_tailored_resume_pdf",
+      "type": "requirement",
+      "label": "Tailored resume PDFs",
+      "description": "For each relevant job, generate a formatted PDF resume variant aligned to that posting.",
+      "is_functional": true
+    },
+    {
+      "id": "req_app_packet",
+      "type": "requirement",
+      "label": "Application packet artifacts",
+      "description": "Produce per-job artifacts such as cover letter text and answers/cheatsheet for forms, suitable for human submission.",
+      "is_functional": true
+    },
+    {
+      "id": "req_unattended_recovery",
+      "type": "requirement",
+      "label": "Unattended execution with recovery",
+      "description": "Run overnight with retries, resumability, checkpointing, and summarized error reporting without manual babysitting.",
+      "is_functional": true
+    },
+    {
+      "id": "req_offline_tests",
+      "type": "requirement",
+      "label": "Offline scraping validation",
+      "description": "Automated tests validate parsing/normalization using fixtures, not live network calls.",
+      "is_functional": true
+    },
+    {
+      "id": "dec_scope_human_submit",
+      "type": "decision",
+      "label": "Human submits applications",
+      "description": "Automate discovery, tailoring, and packet generation; stop before autonomous submission.",
+      "rationale": "Reduces CAPTCHA surfaces and keeps automation closer to assistive tooling.",
+      "alternatives_considered": [
+        "Fully automated submission where possible",
+        "Discovery + resume only"
+      ]
+    },
+    {
+      "id": "dec_conservative_automation",
+      "type": "decision",
+      "label": "Conservative automation defaults",
+      "description": "Prefer smaller batches, strict rate limits, backoff/jitter, and periodic manual session refresh.",
+      "rationale": "Operator preference to reduce aggressive automation signals on authenticated sources.",
+      "alternatives_considered": [
+        "Throughput-first scraping",
+        "Audit-only logging without behavioral throttles"
+      ]
+    },
+    {
+      "id": "dec_auth_playwright_storage",
+      "type": "decision",
+      "label": "Playwright session state on disk",
+      "description": "Persist authentication using Playwright storageState JSON and/or profile directories, refreshed by a login helper when invalid.",
+      "rationale": "Standard Playwright approach for authenticated sites; supports 'login once if missing' flows.",
+      "alternatives_considered": [
+        "Manual cookie paste only",
+        "Third-party session brokers"
+      ]
+    },
+    {
+      "id": "dec_auth_host_volume_canonical",
+      "type": "decision",
+      "label": "Host refresh + shared volume canonical path",
+      "description": "Default: host-side refresh writes storageState into a directory mounted into Docker batch jobs.",
+      "rationale": "Most reliable on macOS Docker versus in-container interactive browser setup.",
+      "alternatives_considered": [
+        "All-in-container VNC/X11 login",
+        "Separate Linux runner"
+      ]
+    },
+    {
+      "id": "dec_runtime_local_docker",
+      "type": "decision",
+      "label": "Local Docker packaging",
+      "description": "Run the batch pipeline in Docker on a personal machine with mounted volumes for state, DB, artifacts, and templates.",
+      "rationale": "Reproducible dependencies; pairs with volume-mounted secrets and outputs.",
+      "alternatives_considered": [
+        "Native venv only",
+        "Cloud VM runner"
+      ]
+    },
+    {
+      "id": "dec_stack_python_playwright",
+      "type": "decision",
+      "label": "Python orchestration + Playwright",
+      "description": "Python service architecture with Playwright automation and pytest-based tests.",
+      "rationale": "Good fit for data/sqlite/pdf/docx tooling and a single-language codebase.",
+      "alternatives_considered": [
+        "Node.js + Playwright",
+        "Polyglot split services"
+      ]
+    },
+    {
+      "id": "dec_store_sqlite",
+      "type": "decision",
+      "label": "SQLite primary database",
+      "description": "SQLite on a mounted volume with migrations for listings, runs, checkpoints, and artifact pointers.",
+      "rationale": "Low ops overhead for a single-user local pipeline; easy backup via file copy.",
+      "alternatives_considered": [
+        "Postgres container",
+        "DuckDB"
+      ]
+    },
+    {
+      "id": "dec_tailoring_chatgpt_ui",
+      "type": "decision",
+      "label": "Tailoring via ChatGPT web UI automation",
+      "description": "Use Playwright to drive the ChatGPT web UI to produce structured tailoring fields validated against schemas.",
+      "rationale": "Matches user preference to use ChatGPT without mandating a particular vendor API SDK as the primary path.",
+      "alternatives_considered": [
+        "OpenAI/Anthropic HTTP API as primary",
+        "Deterministic-only tailoring"
+      ]
+    },
+    {
+      "id": "dec_resume_docx_canonical",
+      "type": "decision",
+      "label": "Canonical resume is a DOCX template",
+      "description": "Authoritative resume content starts as a DOCX on a mounted volume; PDFs are rendered from programmatic fills.",
+      "rationale": "Matches user workflow preference; DOCX is a practical interchange format for edits.",
+      "alternatives_considered": [
+        "YAML/Markdown source",
+        "JSON Resume",
+        "LaTeX source"
+      ]
+    },
+    {
+      "id": "dec_mvp_li_wf_ats",
+      "type": "decision",
+      "label": "MVP boards: LinkedIn + Wellfound + one ATS-like public board",
+      "description": "Initial adapters target three categories while keeping a shared normalized contract.",
+      "rationale": "Covers authenticated and semi-standard listing pages while staying bounded for v1.",
+      "alternatives_considered": [
+        "Two authenticated boards only",
+        "RSS-first MVP"
+      ]
+    },
+    {
+      "id": "dec_scrape_llm_planner",
+      "type": "decision",
+      "label": "LLM-assisted scrape planning with Playwright execution",
+      "description": "For heterogeneous layouts, an LLM proposes an extraction plan from captured DOM/context; Playwright executes and results are validated before persistence.",
+      "rationale": "Addresses 'different layouts per board' without hand-writing infinite one-off selectors for every variant.",
+      "alternatives_considered": [
+        "Hand-written adapters only",
+        "Pure CV/vision scraping without structured plans"
+      ]
+    },
+    {
+      "id": "iface_normalized_job",
+      "type": "interface",
+      "label": "Normalized job record",
+      "description": "Canonical fields and provenance for a listing after adapter parsing.",
+      "contract": "{source, source_job_id?, canonical_url, title, company, location?, remote?, description_text, posted_at?, scraped_at, raw_ref?, content_hash}"
+    },
+    {
+      "id": "iface_user_profile",
+      "type": "interface",
+      "label": "User profile model",
+      "description": "Structured preferences used for filtering and tailoring outputs.",
+      "contract": "{skills[], seniority, role_titles[], industries[], locations[], must_have[], avoid[], compensation?, narrative?}"
+    },
+    {
+      "id": "iface_tailored_artifact",
+      "type": "interface",
+      "label": "Tailoring payload contract",
+      "description": "Validated structured output that drives DOCX fill and packet text assembly.",
+      "contract": "{highlights[], role_title_override?, summary_bullets[], cover_letter_paragraphs[], form_answers[{q_key,q_text,answer}], claims_used[]}"
+    },
+    {
+      "id": "iface_scrape_plan",
+      "type": "interface",
+      "label": "Scrape execution plan",
+      "description": "Machine-checkable steps/selectors/heuristics the Playwright runner executes, produced or revised by the planner.",
+      "contract": "{version, site_key, steps:[{action,selector?,wait_for?,extract:{fields[]}}], validation:{min_items,required_fields[]}}"
+    },
+    {
+      "id": "iface_resume_docx",
+      "type": "interface",
+      "label": "Resume DOCX template contract",
+      "description": "Defines placeholder fields mapping from profile + tailoring payload to DOCX template regions.",
+      "contract": "{template_path, placeholders:{summary,experience_bullets,skills,title?}}"
+    },
+    {
+      "id": "comp_orchestrator",
+      "type": "component",
+      "label": "Pipeline orchestrator",
+      "description": "Stage scheduling, retries, checkpoints, run reports, and per-site circuit breaking.",
+      "file_refs": [],
+      "has_tests": false
+    },
+    {
+      "id": "comp_rate_limiter",
+      "type": "component",
+      "label": "Rate limit and jitter policy",
+      "description": "Centralized throttles, concurrency caps, and cooldowns per domain for conservative operation.",
+      "file_refs": [],
+      "has_tests": false
+    },
+    {
+      "id": "comp_scraper_adapters",
+      "type": "component",
+      "label": "Playwright scrape executor",
+      "description": "Executes scrape plans, collects listings, normalizes to iface_normalized_job, and emits artifacts for debugging.",
+      "file_refs": [],
+      "has_tests": false
+    },
+    {
+      "id": "comp_scrape_planner",
+      "type": "component",
+      "label": "LLM scrape planner",
+      "description": "Produces and updates iface_scrape_plan from page captures; never persists unvalidated extractions.",
+      "file_refs": [],
+      "has_tests": false
+    },
+    {
+      "id": "comp_store",
+      "type": "component",
+      "label": "Persistence layer",
+      "description": "Migrations, dedupe upserts, run metadata, and artifact storage pointers.",
+      "file_refs": [],
+      "has_tests": false
+    },
+    {
+      "id": "comp_relevance_engine",
+      "type": "component",
+      "label": "Relevance scoring",
+      "description": "Filters and ranks jobs against iface_user_profile with explainability metadata.",
+      "file_refs": [],
+      "has_tests": false
+    },
+    {
+      "id": "comp_docx_renderer",
+      "type": "component",
+      "label": "DOCX render and PDF export",
+      "description": "Fills the mounted DOCX template using python-docx/docxtpl patterns and exports PDF via a stable headless conversion path.",
+      "file_refs": [],
+      "has_tests": false
+    },
+    {
+      "id": "comp_packet_assembler",
+      "type": "component",
+      "label": "Application packet assembler",
+      "description": "Writes cover letter and form-answer files per job from validated tailoring payloads.",
+      "file_refs": [],
+      "has_tests": false
+    },
+    {
+      "id": "comp_chatgpt_ui_tailor",
+      "type": "component",
+      "label": "ChatGPT UI tailoring driver",
+      "description": "Playwright automation of ChatGPT web UI with storageState login; parses model output into iface_tailored_artifact with schema validation and retries.",
+      "file_refs": [],
+      "has_tests": false
+    },
+    {
+      "id": "risk_bot_and_tos",
+      "type": "risk",
+      "label": "Bot detection and platform policy",
+      "description": "Boards and auxiliary web UIs may block automation; behavior may conflict with terms and threaten accounts.",
+      "severity": 0.9
+    },
+    {
+      "id": "risk_chatgpt_ui_fragility",
+      "type": "risk",
+      "label": "ChatGPT UI breakage and account friction",
+      "description": "UI changes, A/B tests, CAPTCHAs, or policy enforcement can break tailoring automation independent of job boards.",
+      "severity": 0.88
+    },
+    {
+      "id": "risk_scrape_plan_unsafe",
+      "type": "risk",
+      "label": "Unsafe or hallucinated scrape plans",
+      "description": "LLM-proposed selectors may misfire, silently scrape wrong regions, or over-collect data without strict validation gates.",
+      "severity": 0.78
+    },
+    {
+      "id": "risk_docker_mac_auth",
+      "type": "risk",
+      "label": "Docker-on-Mac auth ergonomics",
+      "description": "Session refresh and browser realism may still be awkward if misconfigured mounts or permissions block state files.",
+      "severity": 0.72
+    },
+    {
+      "id": "risk_session_instability",
+      "type": "risk",
+      "label": "Session expiry mid-run",
+      "description": "Authenticated sources may force re-auth during long runs.",
+      "severity": 0.68
+    },
+    {
+      "id": "risk_docx_pdf_fidelity",
+      "type": "risk",
+      "label": "DOCX/PDF fidelity loss",
+      "description": "Template complexity or conversion tooling may alter layout versus manually crafted documents.",
+      "severity": 0.6
+    },
+    {
+      "id": "asm_operator_posture_conservative",
+      "type": "assumption",
+      "label": "Conservative throughput posture",
+      "description": "Assumes operator accepts slower runs for fewer aggressive automation signals.",
+      "confidence": 0.82,
+      "validated": true
+    },
+    {
+      "id": "asm_host_volume_auth",
+      "type": "assumption",
+      "label": "Host refresh + volume works here",
+      "description": "Assumes storageState files written on the host are visible and usable inside Docker with stable paths.",
+      "confidence": 0.74,
+      "validated": false
+    },
+    {
+      "id": "asm_session_duration",
+      "type": "assumption",
+      "label": "Sessions survive conservative batch windows",
+      "description": "Assumes refreshed sessions remain valid for typical overnight slices given throttling and smaller batches.",
+      "confidence": 0.66,
+      "validated": false
+    },
+    {
+      "id": "asm_chatgpt_ui_available",
+      "type": "assumption",
+      "label": "ChatGPT web session can be established non-interactively after first setup",
+      "description": "Assumes initial headed login can create durable storageState suitable for unattended steps until expiry.",
+      "confidence": 0.58,
+      "validated": false
+    },
+    {
+      "id": "asm_docx_template_maintained",
+      "type": "assumption",
+      "label": "DOCX template uses supported placeholder conventions",
+      "description": "Assumes the user maintains a template compatible with the renderer’s placeholder and paragraph rules.",
+      "confidence": 0.7,
+      "validated": false
+    },
+    {
+      "id": "tst_adapter_fixture_suite",
+      "type": "test",
+      "label": "Adapter and normalization fixture tests",
+      "description": "pytest loads saved HTML/JSON fixtures and asserts iface_normalized_job outputs and dedupe keys without network I/O.",
+      "test_type": "unit",
+      "status": "planned"
+    },
+    {
+      "id": "tst_tailoring_schema_contract",
+      "type": "test",
+      "label": "Tailoring schema conformance tests",
+      "description": "Validates tailoring payloads against JSON Schema using stubbed ChatGPT outputs and golden cases.",
+      "test_type": "conformance",
+      "status": "planned"
+    },
+    {
+      "id": "tst_scrape_plan_replay",
+      "type": "test",
+      "label": "Scrape plan replay tests",
+      "description": "Offline replay of iface_scrape_plan against captured DOM fixtures to ensure extraction stability without live sites.",
+      "test_type": "integration",
+      "status": "planned"
+    }
+  ],
+  "edges": [
+    { "type": "motivated_by", "source_id": "dec_scope_human_submit", "target_id": "obj_overnight_prep" },
+    { "type": "motivated_by", "source_id": "dec_conservative_automation", "target_id": "obj_overnight_prep" },
+    { "type": "motivated_by", "source_id": "dec_auth_playwright_storage", "target_id": "obj_overnight_prep" },
+    { "type": "motivated_by", "source_id": "dec_auth_host_volume_canonical", "target_id": "obj_overnight_prep" },
+    { "type": "motivated_by", "source_id": "dec_runtime_local_docker", "target_id": "obj_overnight_prep" },
+    { "type": "motivated_by", "source_id": "dec_stack_python_playwright", "target_id": "obj_overnight_prep" },
+    { "type": "motivated_by", "source_id": "dec_store_sqlite", "target_id": "obj_overnight_prep" },
+    { "type": "motivated_by", "source_id": "dec_tailoring_chatgpt_ui", "target_id": "obj_overnight_prep" },
+    { "type": "motivated_by", "source_id": "dec_resume_docx_canonical", "target_id": "obj_overnight_prep" },
+    { "type": "motivated_by", "source_id": "dec_mvp_li_wf_ats", "target_id": "obj_overnight_prep" },
+    { "type": "motivated_by", "source_id": "dec_scrape_llm_planner", "target_id": "obj_overnight_prep" },
+    { "type": "assumes", "source_id": "dec_conservative_automation", "target_id": "asm_operator_posture_conservative" },
+    { "type": "assumes", "source_id": "dec_auth_host_volume_canonical", "target_id": "asm_host_volume_auth" },
+    { "type": "assumes", "source_id": "dec_auth_playwright_storage", "target_id": "asm_session_duration" },
+    { "type": "assumes", "source_id": "dec_tailoring_chatgpt_ui", "target_id": "asm_chatgpt_ui_available" },
+    { "type": "assumes", "source_id": "dec_resume_docx_canonical", "target_id": "asm_docx_template_maintained" },
+    { "type": "implements", "source_id": "comp_rate_limiter", "target_id": "req_dynamic_js" },
+    { "type": "implements", "source_id": "comp_scraper_adapters", "target_id": "req_multi_source" },
+    { "type": "implements", "source_id": "comp_scraper_adapters", "target_id": "req_auth_sites" },
+    { "type": "implements", "source_id": "comp_scrape_planner", "target_id": "req_dynamic_js" },
+    { "type": "implements", "source_id": "comp_store", "target_id": "req_dedup_persist" },
+    { "type": "implements", "source_id": "comp_relevance_engine", "target_id": "req_profile_match" },
+    { "type": "implements", "source_id": "comp_docx_renderer", "target_id": "req_tailored_resume_pdf" },
+    { "type": "implements", "source_id": "comp_packet_assembler", "target_id": "req_app_packet" },
+    { "type": "implements", "source_id": "comp_chatgpt_ui_tailor", "target_id": "req_tailored_resume_pdf" },
+    { "type": "implements", "source_id": "comp_chatgpt_ui_tailor", "target_id": "req_app_packet" },
+    { "type": "implements", "source_id": "comp_orchestrator", "target_id": "req_unattended_recovery" },
+    { "type": "implements", "source_id": "tst_adapter_fixture_suite", "target_id": "req_offline_tests" },
+    { "type": "implements", "source_id": "tst_scrape_plan_replay", "target_id": "req_offline_tests" },
+    { "type": "implements", "source_id": "tst_tailoring_schema_contract", "target_id": "req_offline_tests" },
+    { "type": "exposes", "source_id": "comp_scraper_adapters", "target_id": "iface_normalized_job" },
+    { "type": "exposes", "source_id": "comp_scrape_planner", "target_id": "iface_scrape_plan" },
+    { "type": "exposes", "source_id": "comp_chatgpt_ui_tailor", "target_id": "iface_tailored_artifact" },
+    { "type": "exposes", "source_id": "comp_docx_renderer", "target_id": "iface_resume_docx" },
+    { "type": "consumes", "source_id": "comp_scraper_adapters", "target_id": "iface_scrape_plan" },
+    { "type": "consumes", "source_id": "comp_store", "target_id": "iface_normalized_job" },
+    { "type": "consumes", "source_id": "comp_relevance_engine", "target_id": "iface_normalized_job" },
+    { "type": "consumes", "source_id": "comp_relevance_engine", "target_id": "iface_user_profile" },
+    { "type": "consumes", "source_id": "comp_chatgpt_ui_tailor", "target_id": "iface_user_profile" },
+    { "type": "consumes", "source_id": "comp_chatgpt_ui_tailor", "target_id": "iface_normalized_job" },
+    { "type": "consumes", "source_id": "comp_docx_renderer", "target_id": "iface_user_profile" },
+    { "type": "consumes", "source_id": "comp_docx_renderer", "target_id": "iface_tailored_artifact" },
+    { "type": "consumes", "source_id": "comp_docx_renderer", "target_id": "iface_resume_docx" },
+    { "type": "consumes", "source_id": "comp_packet_assembler", "target_id": "iface_tailored_artifact" },
+    { "type": "consumes", "source_id": "comp_scrape_planner", "target_id": "iface_normalized_job" },
+    { "type": "depends_on", "source_id": "comp_orchestrator", "target_id": "comp_rate_limiter" },
+    { "type": "depends_on", "source_id": "comp_orchestrator", "target_id": "comp_scraper_adapters" },
+    { "type": "depends_on", "source_id": "comp_orchestrator", "target_id": "comp_scrape_planner" },
+    { "type": "depends_on", "source_id": "comp_orchestrator", "target_id": "comp_store" },
+    { "type": "depends_on", "source_id": "comp_orchestrator", "target_id": "comp_relevance_engine" },
+    { "type": "depends_on", "source_id": "comp_orchestrator", "target_id": "comp_chatgpt_ui_tailor" },
+    { "type": "depends_on", "source_id": "comp_orchestrator", "target_id": "comp_docx_renderer" },
+    { "type": "depends_on", "source_id": "comp_orchestrator", "target_id": "comp_packet_assembler" },
+    { "type": "depends_on", "source_id": "comp_scraper_adapters", "target_id": "comp_rate_limiter" },
+    { "type": "depends_on", "source_id": "comp_chatgpt_ui_tailor", "target_id": "comp_rate_limiter" },
+    { "type": "depends_on", "source_id": "comp_scrape_planner", "target_id": "comp_rate_limiter" },
+    { "type": "depends_on", "source_id": "comp_pdf_factory_deprec", "target_id": "comp_store" },
+    { "type": "depends_on", "source_id": "comp_docx_renderer", "target_id": "comp_store" },
+    { "type": "depends_on", "source_id": "comp_packet_assembler", "target_id": "comp_store" },
+    { "type": "depends_on", "source_id": "comp_chatgpt_ui_tailor", "target_id": "comp_store" },
+    { "type": "depends_on", "source_id": "comp_scrape_planner", "target_id": "comp_chatgpt_ui_tailor" },
+    { "type": "depends_on", "source_id": "comp_scrape_planner", "target_id": "comp_scraper_adapters" },
+    { "type": "conflicts_with", "source_id": "risk_bot_and_tos", "target_id": "req_auth_sites" },
+    { "type": "conflicts_with", "source_id": "risk_chatgpt_ui_fragility", "target_id": "dec_tailoring_chatgpt_ui" },
+    { "type": "conflicts_with", "source_id": "risk_scrape_plan_unsafe", "target_id": "dec_scrape_llm_planner" },
+    { "type": "conflicts_with", "source_id": "risk_docker_mac_auth", "target_id": "dec_runtime_local_docker" },
+    { "type": "invalidates", "source_id": "risk_session_instability", "target_id": "asm_session_duration" },
+    { "type": "invalidates", "source_id": "risk_chatgpt_ui_fragility", "target_id": "asm_chatgpt_ui_available" },
+    { "type": "verifies", "source_id": "tst_adapter_fixture_suite", "target_id": "comp_scraper_adapters" },
+    { "type": "verifies", "source_id": "tst_adapter_fixture_suite", "target_id": "iface_normalized_job" },
+    { "type": "verifies", "source_id": "tst_scrape_plan_replay", "target_id": "comp_scraper_adapters" },
+    { "type": "verifies", "source_id": "tst_scrape_plan_replay", "target_id": "iface_scrape_plan" },
+    { "type": "verifies", "source_id": "tst_tailoring_schema_contract", "target_id": "comp_chatgpt_ui_tailor" },
+    { "type": "verifies", "source_id": "tst_tailoring_schema_contract", "target_id": "iface_tailored_artifact" },
+    { "type": "guards_against", "source_id": "tst_scrape_plan_replay", "target_id": "risk_scrape_plan_unsafe" },
+    { "type": "guards_against", "source_id": "tst_tailoring_schema_contract", "target_id": "risk_chatgpt_ui_fragility" },
+    { "type": "guards_against", "source_id": "tst_adapter_fixture_suite", "target_id": "risk_bot_and_tos" },
+    { "type": "validates", "source_id": "tst_tailoring_schema_contract", "target_id": "dec_tailoring_chatgpt_ui" },
+    { "type": "validates", "source_id": "tst_scrape_plan_replay", "target_id": "dec_scrape_llm_planner" }
+  ]
 }
 [/GRAPH UPDATE]
-(Component, interface, assumption, and risk node bodies for the new ones added in this phase, so they're not just dangling ids referenced in edges:)
-comp_orchestrator — pipeline run loop with stage-level error boundaries and retry policy.
-comp_scraper_engine — Playwright context manager, stealth tweaks, dispatches adapters, normalises output.
-comp_session_store — loads/saves storageState per site; flags expired sessions.
-comp_db — SQLite + Drizzle; jobs, runs, generations tables.
-comp_filter — scores listings against profile; emits accept/reject + reason.
-comp_resume_gen — calls LLM (grounded) then comp_pdf_renderer.
-comp_pdf_renderer — Handlebars HTML -> Playwright page.pdf.
-comp_llm_client — hosted-LLM SDK wrapper with retry, JSON-mode validation, cost tracking.
-comp_notifier — Slack/Discord webhook poster.
-comp_test_harness — fixture loader + Playwright route mocking.
-comp_profile_bootstrap — one-shot CLI: PDF/DOCX -> text -> LLM -> JSON Resume -> review.
-comp_docker_image — Dockerfile (Playwright base) + compose with volumes for db/, sessions/, outputs/, fixtures/.
-iface_db_repo — typed CRUD for jobs/runs/generations.
-iface_resume_render_input — { resumeJson, jobMeta, themeId } -> PDF bytes.
-iface_run_summary — { runId, startedAt, finishedAt, perAdapterStats[], newJobs, filteredIn, generated, failures[] }.
-asm_resume_parse_accuracy (0.6) — LLM parses user's PDF correctly on first pass.
-asm_html_template_renders (0.7) — chosen HTML template prints reliably under Chromium.
-asm_docker_playwright_apple_silicon (0.7) — Playwright Docker image runs reliably on user's Mac (especially if Apple Silicon).
-risk_llm_hallucinates_resume (0.8) — LLM invents experience the user can't verify before applying.
-risk_dedup_misses (0.6) — fingerprint scheme misses cross-board re-posts or near-duplicates.
-risk_run_exceeds_window (0.5) — total run-time pushes past morning, partial output.
-Two scope-defining questions before Phase 3 (testing + error handling):
-The biggest remaining ambiguity is the word "application" in your brief. The capabilities you listed stop at PDF generation — but "job application pipeline" could imply auto-submission. That's a totally different blast radius (much higher ToS risk, much more brittle, needs per-board form automation). And the second question pins down how big "overnight" actually is, which gates the LLM budget assumption and the run-window risk.
+Fix required before the graph is valid
+I introduced a bad edge by mistake: comp_pdf_factory_deprec does not exist in the nodes list (leftover from renaming comp_pdf_factory → comp_docx_renderer). Remove that edge and point artifact dependencies at comp_docx_renderer only. I’ll treat that as a correction in the next revision; mentally replace that edge with:
+depends_on: comp_docx_renderer → comp_store
+Also remove the erroneous consumes comp_scrape_planner → iface_normalized_job if the planner consumes page capture not normalized job—planner input is better modeled as a separate capture interface next round.
 
-What does 'application' mean here? Where does the pipeline stop?
-Artifacts only - pipeline produces a per-job folder (tailored PDF + cover letter? + listing snapshot + apply URL) for me to review and submit manually next morning
-Roughly what scale per overnight run? (Pins LLM budget assumption and decides batching / runtime budget.)
-Not sure - design for medium and make it configurable
+When ChatGPT Ul tailoring fails (schema invalid, Ul changed, session dead), what should the overnight run do for the affected jobs?
+Skip tailoring for that job, mark deferred for morning review; continue pipeline
+What should the LLM scrape planner primarily consume to propose iface_scrape_plan? (This determines fixtures and testability.)
+Accessibility tree + trimmed HTML snapshot per page (text-first, cheaper)
+Preferred DOCX→PDF path on macOS/Docker (fidelity vs simplicity tradeoff)?
+LibreOffice headless in container (common default)
 
-All the major forks are decided. Final graph below, then the plan.
-[GRAPH UPDATE]
-{
-"nodes": [
-{ "id": "obj_overnight_run", "type": "objective", "label": "Unattended overnight execution", "description": "Pipeline runs start-to-finish without human intervention, recovering from transient errors." },
-{ "id": "obj_multi_board_coverage", "type": "objective", "label": "Coverage across many job boards", "description": "Aggregate listings from public ATSes and auth-walled platforms in a single run." },
-{ "id": "obj_only_relevant", "type": "objective", "label": "Only act on relevant jobs", "description": "Avoid wasting LLM tokens and PDF generation on jobs that don't match the user profile." },
-{ "id": "obj_offline_testable", "type": "objective", "label": "Testable without live sites", "description": "Scraper logic must be exercisable in CI / locally without hitting real job boards." },
-{ "id": "obj_human_in_loop_submit", "type": "objective", "label": "Human submits final application", "description": "Pipeline produces artifacts; user does the final review + submission. No auto-apply." },
-{ "id": "req_dedup", "type": "requirement", "label": "Cross-run deduplication", "description": "DB must not store duplicate listings across pipeline runs.", "is_functional": true },
-{ "id": "req_error_recovery", "type": "requirement", "label": "Full error recovery", "description": "A failure in one adapter, one listing, or one resume must not abort the whole run.", "is_functional": true },
-{ "id": "req_tailored_pdf", "type": "requirement", "label": "Tailored resume PDF per job", "description": "Each relevant job gets a uniquely tailored, formatted PDF resume.", "is_functional": true },
-{ "id": "req_tailored_cover", "type": "requirement", "label": "Tailored cover letter PDF per job", "description": "Each relevant job also gets a tailored cover letter PDF rendered with the same style as the resume.", "is_functional": true },
-{ "id": "req_filter_relevance", "type": "requirement", "label": "Profile-based relevance filter", "description": "Filter listings against skills, seniority, and role preferences before generation.", "is_functional": true },
-{ "id": "req_offline_test_harness", "type": "requirement", "label": "Offline scraper test harness", "description": "Tests use saved HTML/JSON fixtures, never hit live sites.", "is_functional": false },
-{ "id": "req_dynamic_loading", "type": "requirement", "label": "Handle dynamic page loads", "description": "Adapters must wait for client-rendered content (infinite scroll, lazy-loaded cards).", "is_functional": true },
-{ "id": "req_run_visibility", "type": "requirement", "label": "Run outcome observable", "description": "Every run produces a structured summary that reaches the user without them checking logs.", "is_functional": false },
-{ "id": "req_urgent_alerts", "type": "requirement", "label": "Urgent alerts mid-run", "description": "High-severity events (session expiry, sustained LLM outage) fire an immediate webhook, not just the end-of-run summary.", "is_functional": false },
-{ "id": "req_no_resume_fabrication", "type": "requirement", "label": "Generated documents must not fabricate experience", "description": "LLM may rewrite/reorder/emphasise but must never introduce skills, employers, dates, or accomplishments not in the master profile. Applies to both resume and cover letter.", "is_functional": false },
-{ "id": "req_artifact_folder", "type": "requirement", "label": "Per-job artifact folder", "description": "Each generated job produces a deterministic folder layout: resume.pdf, cover_letter.pdf, listing.json, prompt.md, generation_meta.json, apply_url.txt.", "is_functional": true },
-{ "id": "req_resumable_run", "type": "requirement", "label": "Crash-resumable run", "description": "If the container is killed mid-run, the next invocation can resume without redoing completed stages.", "is_functional": true },
-{ "id": "req_configurable_scale", "type": "requirement", "label": "Configurable boards and limits", "description": "Board list, per-board listing caps, per-night resume cap, and concurrency are all config-driven, not hardcoded.", "is_functional": false },
-{ "id": "dec_node_ts", "type": "decision", "label": "Node.js + TypeScript runtime", "description": "Whole pipeline written in TypeScript on Node.", "rationale": "User-selected. Strong Playwright + LLM SDK ecosystem; single-language stack from scraping through PDF generation; first-class async for I/O-bound work.", "alternatives_considered": ["Python", "Go"] },
-{ "id": "dec_playwright", "type": "decision", "label": "Playwright for browser automation", "description": "Playwright (Chromium) for all rendered-page scraping with persistent BrowserContext for session reuse.", "rationale": "Built-in storageState, robust auto-waits, network interception, multi-browser, better stealth posture than Selenium.", "alternatives_considered": ["Puppeteer", "Crawlee", "Selenium"] },
-{ "id": "dec_llm_hosted", "type": "decision", "label": "Hosted LLM API for generation", "description": "Hosted model (OpenAI/Anthropic) drives both resume and cover letter generation in JSON-mode/structured output.", "rationale": "User-selected. Higher tailoring quality vs local models; structured-output / JSON mode available; one provider for both documents.", "alternatives_considered": ["Local Ollama", "Pure template substitution"] },
-{ "id": "dec_auth_mixed", "type": "decision", "label": "Mixed auth strategy", "description": "Persisted sessions for LinkedIn/Wellfound; unauthenticated for public ATSes (Greenhouse, Lever, Ashby, public company pages).", "rationale": "User-selected. Avoids automated login on protected sites.", "alternatives_considered": ["Full auto-login", "Public-only", "Third-party APIs"] },
-{ "id": "dec_session_storage_state", "type": "decision", "label": "Manual login -> persisted storageState", "description": "One-shot login CLI opens headed Chromium, user logs in, storageState JSON saved per site; pipeline reuses it.", "rationale": "Sidesteps 2FA/captcha automation; refreshable on demand.", "alternatives_considered": ["Cookie import from real browser profile", "Username/password automation"] },
-{ "id": "dec_session_urgent_alert", "type": "decision", "label": "Session expiry: skip + urgent alert + continue", "description": "On detecting login redirect/401/captcha page: mark adapter needs_relogin in DB, fire urgent webhook immediately (severity=urgent), continue rest of pipeline. Future runs auto-skip the adapter until login is re-run.", "rationale": "User-selected. Maximises overnight yield while giving the user an actionable signal in time to re-auth.", "alternatives_considered": ["Silent skip", "Abort whole run", "Block on login (defeats unattended)"] },
-{ "id": "dec_per_site_adapters", "type": "decision", "label": "Per-site adapter pattern", "description": "Each board has its own adapter conforming to a common ScraperAdapter interface. Adapters are responsible for their own SessionExpired detection (login URL substring, captcha selector).", "rationale": "Per-source isolation; one broken adapter cannot fail the run; enables fixture-based testing.", "alternatives_considered": ["Generic config-driven scraper", "Monolithic scraper"] },
-{ "id": "dec_docker", "type": "decision", "label": "Docker container deployment", "description": "Pipeline ships as a Docker image based on mcr.microsoft.com/playwright; volumes mount db/, sessions/, outputs/, fixtures/, config/, profile/.", "rationale": "Reproducible Playwright environment; isolates from host Node version; easy to relocate.", "alternatives_considered": ["Bare Node + npx playwright install", "systemd service", "GitHub Actions cron"] },
-{ "id": "dec_host_launchd", "type": "decision", "label": "Host launchd triggers one-shot container", "description": "macOS launchd job runs docker compose run --rm pipeline nightly. Container exits at end of run.", "rationale": "No long-running daemon; logs captured per invocation; restart-on-failure handled by launchd.", "alternatives_considered": ["In-container cron", "Long-running container with internal scheduler"] },
-{ "id": "dec_webhook_notify", "type": "decision", "label": "Webhook notification (Slack/Discord)", "description": "End-of-run summary AND urgent mid-run alerts posted to a webhook URL.", "rationale": "Push-based; no SMTP setup; renders nicely; addresses silent-failure risk; supports both summary and urgent posts.", "alternatives_considered": ["Email via SMTP", "Pushover/ntfy", "Local desktop notification only"] },
-{ "id": "dec_jsonresume", "type": "decision", "label": "JSON Resume schema as canonical profile", "description": "Master resume + extension fields (x_preferences) stored as a single JSON Resume document.", "rationale": "Open standard, large theme ecosystem, easy to validate, schema documents itself.", "alternatives_considered": ["Custom schema", "LaTeX source as ground truth", "Markdown + frontmatter"] },
-{ "id": "dec_resume_bootstrap_once", "type": "decision", "label": "One-shot LLM-assisted PDF -> JSON Resume bootstrap", "description": "Separate bootstrap CLI extracts text from user's PDF/DOCX, prompts the LLM to emit JSON Resume, opens it in $EDITOR for manual review/edit before commit.", "rationale": "User has no structured source today; one-time cost; manual review prevents bad data.", "alternatives_considered": ["Parse every run", "Manual transcription only", "Pure regex/heuristic parsing"] },
-{ "id": "dec_pdf_via_html", "type": "decision", "label": "PDF via Handlebars HTML + Playwright print", "description": "Both resume and cover letter rendered through Handlebars templates, printed by Chromium (Playwright page.pdf). Same renderer, different templates.", "rationale": "Reuses Playwright; full CSS control; deterministic; one renderer for two doc types.", "alternatives_considered": ["@react-pdf/renderer", "LaTeX in container", "Pandoc/Word"] },
-{ "id": "dec_cover_letter_pdf", "type": "decision", "label": "Cover letter rendered to PDF alongside resume", "description": "Per-job artifact folder always includes both resume.pdf and cover_letter.pdf (same renderer, same grounding rules).", "rationale": "User-selected. Ready-to-upload; consistent styling; one extra LLM call per job.", "alternatives_considered": ["Resume only", "Cover letter as Markdown", "Configurable per board"] },
-{ "id": "dec_sqlite", "type": "decision", "label": "SQLite via better-sqlite3 + Drizzle ORM", "description": "Embedded SQLite on a Docker volume; Drizzle for typed schema and migrations.", "rationale": "Single-machine, single-writer; zero ops; survives container restarts via volume; Drizzle gives TS types and migrations.", "alternatives_considered": ["Postgres", "DuckDB", "Plain JSON files"] },
-{ "id": "dec_dedup_multikey", "type": "decision", "label": "Multi-key dedup fingerprint", "description": "Primary: (source, source_id). Secondary: SHA-256(normalised company+title+normalised_url). Tertiary: SHA-256(normalised description).", "rationale": "Same job often appears on multiple boards under different IDs; URL/title alone misses re-posts.", "alternatives_considered": ["URL-only", "(source, source_id) only", "Title+company only"] },
-{ "id": "dec_llm_grounded_rewrite", "type": "decision", "label": "LLM operates in grounded mode only", "description": "LLM receives master resume + JD; must (a) reorder/select bullets, (b) rewrite phrasing, (c) emphasise matching skills. May NOT introduce new employers, dates, titles, or skills. Output validated against a whitelist derived from the master profile (companies, dates, skills, titles); non-whitelisted tokens trigger one regeneration; second failure rejects the job and logs the reason.", "rationale": "Eliminates the highest-impact failure mode (fabrication user can't catch overnight). Applies to cover letter too.", "alternatives_considered": ["Free generation", "Few-shot only", "No grounding constraints"] },
-{ "id": "dec_artifacts_only", "type": "decision", "label": "Artifacts only, no auto-apply", "description": "Pipeline ends at a per-job folder. User reviews + submits manually next morning.", "rationale": "User-selected. Eliminates per-board form automation and removes the largest ToS/legal risk surface.", "alternatives_considered": ["Easy Apply auto-submit", "Full multi-page form auto-submit"] },
-{ "id": "dec_per_stage_retry", "type": "decision", "label": "Per-stage retry + per-adapter circuit breaker", "description": "Each unit of work has bounded retry with exponential backoff and jitter. Per-adapter circuit breaker trips after N consecutive failures and skips remainder.", "rationale": "Most failures are transient. Circuit breaker prevents wasting overnight time on a hard-broken adapter.", "alternatives_considered": ["No retry", "Global retry only", "Infinite retry"] },
-{ "id": "dec_checkpoint_db", "type": "decision", "label": "Checkpoint progress in DB", "description": "Each stage records completion in SQLite (jobs.scraped_at, jobs.filtered_at, generations.status). Re-running a run_id resumes after the last completed stage.", "rationale": "Container restart should not redo work; supports req_resumable_run.", "alternatives_considered": ["File-based checkpoint", "In-memory only"] },
-{ "id": "dec_polite_concurrency", "type": "decision", "label": "Bounded cross-board concurrency, serial within board", "description": "Adapters run concurrently with a configurable pool (default 3). Within an adapter, requests are serial with randomized delay (default 1.5\u20134s) and a per-board listing cap.", "rationale": "Maximises wall-clock throughput while staying polite per origin; reduces bot-detection signal.", "alternatives_considered": ["Fully serial", "Unbounded concurrency", "Concurrent within a single board"] },
-{ "id": "dec_test_layers", "type": "decision", "label": "Three test layers: unit / conformance / integration", "description": "(1) Per-adapter unit tests against saved HTML fixtures. (2) Conformance test that every registered adapter satisfies ScraperAdapter and produces a schema-valid Job. (3) Orchestrator integration test with mock adapters + mock LLM + temp SQLite running the full pipeline.", "rationale": "Layered coverage with no live-site dependence.", "alternatives_considered": ["Unit-only", "Integration-only", "Live VCR tests"] },
-{ "id": "comp_orchestrator", "type": "component", "label": "Pipeline orchestrator", "description": "Top-level run loop: scrape -> ingest/dedup -> filter -> generate -> notify. Owns error boundaries, retry policy, and checkpointing.", "has_tests": false },
-{ "id": "comp_scraper_engine", "type": "component", "label": "Scraper engine + adapter registry", "description": "Manages Playwright contexts, applies stealth tweaks, dispatches per-site adapters, normalises results.", "has_tests": false },
-{ "id": "comp_session_store", "type": "component", "label": "Session storage state manager", "description": "Loads/saves Playwright storageState JSON per site; flags expired sessions; emits SessionExpiredError; tracks needs_relogin.", "has_tests": false },
-{ "id": "comp_db", "type": "component", "label": "Persistent listings database", "description": "SQLite + Drizzle schema: runs, jobs, fingerprints, generations, errors, adapter_health.", "has_tests": false },
-{ "id": "comp_filter", "type": "component", "label": "Relevance filter", "description": "Scores listings against the user profile (skills, seniority, role keywords, location, exclude_keywords); records reason on reject.", "has_tests": false },
-{ "id": "comp_resume_gen", "type": "component", "label": "Resume tailoring", "description": "Calls grounded LLM to rewrite resume sections, validates against master, then renders PDF.", "has_tests": false },
-{ "id": "comp_cover_letter_gen", "type": "component", "label": "Cover letter tailoring", "description": "Calls grounded LLM to draft a per-job cover letter, validates against master, then renders PDF.", "has_tests": false },
-{ "id": "comp_pdf_renderer", "type": "component", "label": "HTML -> PDF renderer", "description": "Renders Handlebars templates for resume and cover letter; prints via Playwright page.pdf.", "has_tests": false },
-{ "id": "comp_llm_client", "type": "component", "label": "LLM API client", "description": "Hosted-LLM SDK wrapper with retry, JSON-mode validation, cost tracking, and offline mock implementation for tests.", "has_tests": false },
-{ "id": "comp_notifier", "type": "component", "label": "Webhook notifier", "description": "Posts run summary AND urgent mid-run alerts to Slack/Discord webhook. Always invoked in a finally block by the orchestrator.", "has_tests": false },
-{ "id": "comp_test_harness", "type": "component", "label": "Fixture-based test harness", "description": "Loads saved HTML pages and intercepts Playwright network responses (page.route); provides mock LLM client and a fixture-recording CLI.", "has_tests": false },
-{ "id": "comp_profile_bootstrap", "type": "component", "label": "Profile bootstrap CLI", "description": "One-shot: PDF/DOCX -> text -> LLM -> JSON Resume draft -> opens in $EDITOR -> commits.", "has_tests": false },
-{ "id": "comp_docker_image", "type": "component", "label": "Docker image + compose", "description": "Dockerfile based on mcr.microsoft.com/playwright; compose mounts ./data and ./config and ./profile.", "has_tests": false },
-{ "id": "comp_artifact_writer", "type": "component", "label": "Per-job artifact writer", "description": "Composes resume_gen + cover_letter_gen output and writes outputs/<YYYY-MM-DD>/<company><title><short_id>/{resume.pdf, cover_letter.pdf, listing.json, prompt.md, generation_meta.json, apply_url.txt}.", "has_tests": false },
-{ "id": "comp_retry", "type": "component", "label": "Retry + circuit breaker utility", "description": "Cross-cutting helper providing bounded exponential backoff + per-key circuit breaker; wraps adapter and LLM calls.", "has_tests": false },
-{ "id": "comp_logger", "type": "component", "label": "Structured logger", "description": "JSON logger keyed on run_id, adapter_id, job_id; piped to stdout (captured by Docker) and to a per-run log file under outputs/.", "has_tests": false },
-{ "id": "iface_job_schema", "type": "interface", "label": "Normalised job listing schema", "description": "Common shape every adapter must return.", "contract": "{ source, source_id, url, title, company, location, remote, posted_at, scraped_at, description_html, description_text, salary?, seniority?, raw }" },
-{ "id": "iface_scraper_adapter", "type": "interface", "label": "ScraperAdapter contract", "description": "Each adapter exposes id, requiresAuth, list(query, ctx), enrich(listing, ctx).", "contract": "interface ScraperAdapter { id: string; requiresAuth: boolean; list(q, ctx): AsyncIterable<RawListing>; enrich?(l, ctx): Promise<RawListing>; detectSessionExpired?(page): boolean; }" },
-{ "id": "iface_user_profile", "type": "interface", "label": "User profile schema", "description": "JSON Resume v1 + extension block.", "contract": "{ ...JSONResume, x_preferences: { target_roles[], seniority, locations[], remote_pref, exclude_keywords[], min_salary? } }" },
-{ "id": "iface_db_repo", "type": "interface", "label": "DB repository", "description": "Typed CRUD + dedup queries.", "contract": "interface JobsRepo { upsertJob(j): {id, isNew}; markStage(jobId, stage); listForRun(runId, stage); markAdapterNeedsRelogin(id); ... }" },
-{ "id": "iface_resume_render_input", "type": "interface", "label": "Document render input", "description": "Input to the PDF renderer (used by both resume and cover letter).", "contract": "{ docType: 'resume' | 'cover_letter', payload: object, jobMeta: { title, company, jobId }, themeId: string } -> Buffer (PDF)" },
-{ "id": "iface_run_summary", "type": "interface", "label": "Run summary", "description": "Structured summary posted to webhook.", "contract": "{ runId, startedAt, finishedAt, perAdapter: [{id, listed, new, errors, circuitTripped, needsRelogin}], filteredIn, generated, failures: [{stage, jobId?, error}], sessionsExpired: string[] }" },
-{ "id": "iface_urgent_alert", "type": "interface", "label": "Urgent alert", "description": "Mid-run urgent webhook payload.", "contract": "{ runId, severity: 'urgent', kind: 'session_expired' | 'llm_outage', adapterId?, message, timestamp }" },
-{ "id": "asm_session_longevity", "type": "assumption", "label": "Persisted sessions survive between nights", "description": "LinkedIn/Wellfound storageState remains valid across days, not just one overnight run.", "confidence": 0.5, "validated": false },
-{ "id": "asm_no_midrun_captcha", "type": "assumption", "label": "Sessions won't trigger captcha mid-run", "description": "Warmed-up sessions can paginate through results without an interactive challenge.", "confidence": 0.5, "validated": false },
-{ "id": "asm_tos_personal_use", "type": "assumption", "label": "User accepts ToS risk of session reuse", "description": "LinkedIn ToS forbids automated access; user is OK with risk to their account.", "confidence": 0.6, "validated": false },
-{ "id": "asm_dom_stable", "type": "assumption", "label": "Site DOMs stable enough for weeks", "description": "Adapters won't need patching more than every few weeks.", "confidence": 0.5, "validated": false },
-{ "id": "asm_llm_budget_ok", "type": "assumption", "label": "Per-night LLM cost is acceptable", "description": "Generating ~15\u201340 tailored resumes + cover letters per night fits a reasonable cost ceiling.", "confidence": 0.7, "validated": false },
-{ "id": "asm_resume_parse_accuracy", "type": "assumption", "label": "PDF parses correctly into JSON Resume", "description": "LLM-assisted bootstrap captures the user's PDF resume accurately enough for one-time manual review.", "confidence": 0.7, "validated": false },
-{ "id": "asm_html_template_renders", "type": "assumption", "label": "HTML template renders consistently to PDF", "description": "Chosen Handlebars templates print reliably under headless Chromium across content lengths.", "confidence": 0.75, "validated": false },
-{ "id": "asm_docker_playwright_apple_silicon", "type": "assumption", "label": "Playwright Docker image works on user's Mac", "description": "Microsoft Playwright base image supports the user's host arch (esp. Apple Silicon) without browser-launch issues.", "confidence": 0.8, "validated": false },
-{ "id": "asm_grounding_whitelist_complete", "type": "assumption", "label": "Whitelist captures all valid claims", "description": "Tokenising the master profile into companies/dates/skills/titles is sufficient to catch fabricated content without too many false positives.", "confidence": 0.7, "validated": false },
-{ "id": "risk_bot_detection", "type": "risk", "label": "Bot detection breaks scraping silently", "description": "A site update can shadow-ban or serve fake/empty content without throwing errors.", "severity": 0.85 },
-{ "id": "risk_session_invalidation", "type": "risk", "label": "Session invalidated overnight", "description": "Auth-walled site logs the session out; pipeline can't recover unattended.", "severity": 0.75 },
-{ "id": "risk_tos_account_action", "type": "risk", "label": "Personal account restricted/banned", "description": "Repeated automated access could trigger account-level enforcement.", "severity": 0.7 },
-{ "id": "risk_dom_drift", "type": "risk", "label": "Adapter silently produces wrong fields", "description": "Site markup changes; adapter still 'succeeds' but with wrong data.", "severity": 0.8 },
-{ "id": "risk_llm_outage", "type": "risk", "label": "LLM API outage or throttling", "description": "Hosted LLM rate-limits or returns 5xx mid-run; resumes fail to generate.", "severity": 0.5 },
-{ "id": "risk_silent_overnight_failure", "type": "risk", "label": "Silent overnight failure", "description": "Pipeline crashes or no-ops; user wakes up to nothing with no signal.", "severity": 0.75 },
-{ "id": "risk_llm_hallucinates_resume", "type": "risk", "label": "LLM fabricates document content", "description": "LLM invents employers/dates/skills the user doesn't have; user submits without catching it.", "severity": 0.8 },
-{ "id": "risk_dedup_misses", "type": "risk", "label": "Dedup fingerprint misses cross-board re-posts", "description": "Same role on multiple boards with different IDs/URLs is counted as N distinct jobs.", "severity": 0.6 },
-{ "id": "risk_run_exceeds_window", "type": "risk", "label": "Run exceeds overnight window", "description": "Total wall-clock time pushes past morning; partial output.", "severity": 0.5 },
-{ "id": "risk_grounding_too_strict", "type": "risk", "label": "Grounding validator over-rejects", "description": "Whitelist false-positives cause many jobs to be rejected after two LLM attempts; low yield.", "severity": 0.5 },
-{ "id": "tst_adapter_unit", "type": "test", "label": "Per-adapter HTML-fixture unit tests", "description": "Each adapter has tests/fixtures/<adapter>/ with saved listing pages; tests load each fixture, run the adapter parser, assert exact normalised-Job output.", "test_type": "unit", "status": "planned" },
-{ "id": "tst_adapter_conformance", "type": "test", "label": "Adapter conformance suite", "description": "Loops every registered adapter, runs against fixtures, validates output against the Job JSON Schema.", "test_type": "conformance", "status": "planned" },
-{ "id": "tst_orchestrator_integration", "type": "test", "label": "Orchestrator integration with mocks", "description": "Runs full pipeline with mock adapters, mock LLM, temp SQLite. Asserts dedup, filter, generation, artifact write, notification.", "test_type": "integration", "status": "planned" },
-{ "id": "tst_resume_grounding", "type": "test", "label": "Grounding validator tests", "description": "Tests the validator rejects LLM outputs containing employers/dates/skills/titles not in the master profile. Includes adversarial fixtures (fabricated company, swapped dates).", "test_type": "unit", "status": "planned" },
-{ "id": "tst_dedup_property", "type": "test", "label": "Dedup fingerprint property tests", "description": "Property-based: variations of same listing collapse to same fingerprint; genuinely different listings don't.", "test_type": "unit", "status": "planned" },
-{ "id": "tst_notifier_always_fires", "type": "test", "label": "Notifier-always-fires test", "description": "Integration test: orchestrator with all stages forced to throw still invokes the notifier exactly once with a failure summary.", "test_type": "integration", "status": "planned" },
-{ "id": "tst_session_expired_signal", "type": "test", "label": "Session-expired urgent-alert test", "description": "Adapter under fixture login-redirect raises SessionExpiredError; orchestrator marks adapter, fires urgent webhook, continues.", "test_type": "integration", "status": "planned" },
-{ "id": "tst_resume_render_snapshot", "type": "test", "label": "PDF snapshot tests", "description": "Rendering known JSON Resume + cover letter inputs produces PDFs whose extracted text matches snapshots. Catches template regressions.", "test_type": "unit", "status": "planned" },
-{ "id": "tst_resume_cover_grounding", "type": "test", "label": "Cover letter grounding tests", "description": "Same grounding validator applied to cover letter outputs; adversarial fixtures included.", "test_type": "unit", "status": "planned" }
-],
-"edges": [
-{ "type": "motivated_by", "source_id": "dec_playwright", "target_id": "obj_multi_board_coverage" },
-{ "type": "motivated_by", "source_id": "dec_auth_mixed", "target_id": "obj_multi_board_coverage" },
-{ "type": "motivated_by", "source_id": "dec_session_storage_state", "target_id": "obj_overnight_run" },
-{ "type": "motivated_by", "source_id": "dec_session_urgent_alert", "target_id": "obj_overnight_run" },
-{ "type": "motivated_by", "source_id": "dec_session_urgent_alert", "target_id": "req_urgent_alerts" },
-{ "type": "motivated_by", "source_id": "dec_per_site_adapters", "target_id": "obj_offline_testable" },
-{ "type": "motivated_by", "source_id": "dec_per_site_adapters", "target_id": "obj_multi_board_coverage" },
-{ "type": "motivated_by", "source_id": "dec_llm_hosted", "target_id": "req_tailored_pdf" },
-{ "type": "motivated_by", "source_id": "dec_llm_hosted", "target_id": "req_tailored_cover" },
-{ "type": "motivated_by", "source_id": "dec_docker", "target_id": "obj_overnight_run" },
-{ "type": "motivated_by", "source_id": "dec_host_launchd", "target_id": "obj_overnight_run" },
-{ "type": "motivated_by", "source_id": "dec_webhook_notify", "target_id": "obj_overnight_run" },
-{ "type": "motivated_by", "source_id": "dec_jsonresume", "target_id": "req_tailored_pdf" },
-{ "type": "motivated_by", "source_id": "dec_resume_bootstrap_once", "target_id": "req_tailored_pdf" },
-{ "type": "motivated_by", "source_id": "dec_llm_grounded_rewrite", "target_id": "req_no_resume_fabrication" },
-{ "type": "motivated_by", "source_id": "dec_artifacts_only", "target_id": "obj_human_in_loop_submit" },
-{ "type": "motivated_by", "source_id": "dec_per_stage_retry", "target_id": "req_error_recovery" },
-{ "type": "motivated_by", "source_id": "dec_checkpoint_db", "target_id": "req_resumable_run" },
-{ "type": "motivated_by", "source_id": "dec_polite_concurrency", "target_id": "obj_overnight_run" },
-{ "type": "motivated_by", "source_id": "dec_test_layers", "target_id": "req_offline_test_harness" },
-{ "type": "motivated_by", "source_id": "dec_cover_letter_pdf", "target_id": "req_tailored_cover" },
-{ "type": "implements", "source_id": "comp_db", "target_id": "req_dedup" },
-{ "type": "implements", "source_id": "comp_orchestrator", "target_id": "req_error_recovery" },
-{ "type": "implements", "source_id": "comp_orchestrator", "target_id": "req_resumable_run" },
-{ "type": "implements", "source_id": "comp_resume_gen", "target_id": "req_tailored_pdf" },
-{ "type": "implements", "source_id": "comp_cover_letter_gen", "target_id": "req_tailored_cover" },
-{ "type": "implements", "source_id": "comp_filter", "target_id": "req_filter_relevance" },
-{ "type": "implements", "source_id": "comp_test_harness", "target_id": "req_offline_test_harness" },
-{ "type": "implements", "source_id": "comp_scraper_engine", "target_id": "req_dynamic_loading" },
-{ "type": "implements", "source_id": "comp_notifier", "target_id": "req_run_visibility" },
-{ "type": "implements", "source_id": "comp_notifier", "target_id": "req_urgent_alerts" },
-{ "type": "implements", "source_id": "comp_resume_gen", "target_id": "req_no_resume_fabrication" },
-{ "type": "implements", "source_id": "comp_cover_letter_gen", "target_id": "req_no_resume_fabrication" },
-{ "type": "implements", "source_id": "comp_artifact_writer", "target_id": "req_artifact_folder" },
-{ "type": "exposes", "source_id": "comp_scraper_engine", "target_id": "iface_scraper_adapter" },
-{ "type": "exposes", "source_id": "comp_scraper_engine", "target_id": "iface_job_schema" },
-{ "type": "exposes", "source_id": "comp_db", "target_id": "iface_db_repo" },
-{ "type": "exposes", "source_id": "comp_resume_gen", "target_id": "iface_resume_render_input" },
-{ "type": "exposes", "source_id": "comp_cover_letter_gen", "target_id": "iface_resume_render_input" },
-{ "type": "exposes", "source_id": "comp_notifier", "target_id": "iface_run_summary" },
-{ "type": "exposes", "source_id": "comp_notifier", "target_id": "iface_urgent_alert" },
-{ "type": "consumes", "source_id": "comp_db", "target_id": "iface_job_schema" },
-{ "type": "consumes", "source_id": "comp_filter", "target_id": "iface_job_schema" },
-{ "type": "consumes", "source_id": "comp_filter", "target_id": "iface_user_profile" },
-{ "type": "consumes", "source_id": "comp_resume_gen", "target_id": "iface_user_profile" },
-{ "type": "consumes", "source_id": "comp_resume_gen", "target_id": "iface_job_schema" },
-{ "type": "consumes", "source_id": "comp_cover_letter_gen", "target_id": "iface_user_profile" },
-{ "type": "consumes", "source_id": "comp_cover_letter_gen", "target_id": "iface_job_schema" },
-{ "type": "consumes", "source_id": "comp_pdf_renderer", "target_id": "iface_resume_render_input" },
-{ "type": "consumes", "source_id": "comp_notifier", "target_id": "iface_run_summary" },
-{ "type": "consumes", "source_id": "comp_notifier", "target_id": "iface_urgent_alert" },
-{ "type": "consumes", "source_id": "comp_artifact_writer", "target_id": "iface_job_schema" },
-{ "type": "depends_on", "source_id": "comp_orchestrator", "target_id": "comp_scraper_engine" },
-{ "type": "depends_on", "source_id": "comp_orchestrator", "target_id": "comp_db" },
-{ "type": "depends_on", "source_id": "comp_orchestrator", "target_id": "comp_filter" },
-{ "type": "depends_on", "source_id": "comp_orchestrator", "target_id": "comp_artifact_writer" },
-{ "type": "depends_on", "source_id": "comp_orchestrator", "target_id": "comp_notifier" },
-{ "type": "depends_on", "source_id": "comp_orchestrator", "target_id": "comp_retry" },
-{ "type": "depends_on", "source_id": "comp_orchestrator", "target_id": "comp_logger" },
-{ "type": "depends_on", "source_id": "comp_scraper_engine", "target_id": "comp_session_store" },
-{ "type": "depends_on", "source_id": "comp_scraper_engine", "target_id": "comp_retry" },
-{ "type": "depends_on", "source_id": "comp_artifact_writer", "target_id": "comp_resume_gen" },
-{ "type": "depends_on", "source_id": "comp_artifact_writer", "target_id": "comp_cover_letter_gen" },
-{ "type": "depends_on", "source_id": "comp_artifact_writer", "target_id": "comp_db" },
-{ "type": "depends_on", "source_id": "comp_resume_gen", "target_id": "comp_llm_client" },
-{ "type": "depends_on", "source_id": "comp_resume_gen", "target_id": "comp_pdf_renderer" },
-{ "type": "depends_on", "source_id": "comp_cover_letter_gen", "target_id": "comp_llm_client" },
-{ "type": "depends_on", "source_id": "comp_cover_letter_gen", "target_id": "comp_pdf_renderer" },
-{ "type": "depends_on", "source_id": "comp_test_harness", "target_id": "comp_scraper_engine" },
-{ "type": "depends_on", "source_id": "comp_profile_bootstrap", "target_id": "comp_llm_client" },
-{ "type": "depends_on", "source_id": "comp_docker_image", "target_id": "comp_orchestrator" },
-{ "type": "assumes", "source_id": "dec_session_storage_state", "target_id": "asm_session_longevity" },
-{ "type": "assumes", "source_id": "dec_session_storage_state", "target_id": "asm_no_midrun_captcha" },
-{ "type": "assumes", "source_id": "dec_session_storage_state", "target_id": "asm_tos_personal_use" },
-{ "type": "assumes", "source_id": "dec_per_site_adapters", "target_id": "asm_dom_stable" },
-{ "type": "assumes", "source_id": "dec_llm_hosted", "target_id": "asm_llm_budget_ok" },
-{ "type": "assumes", "source_id": "dec_resume_bootstrap_once", "target_id": "asm_resume_parse_accuracy" },
-{ "type": "assumes", "source_id": "dec_pdf_via_html", "target_id": "asm_html_template_renders" },
-{ "type": "assumes", "source_id": "dec_docker", "target_id": "asm_docker_playwright_apple_silicon" },
-{ "type": "assumes", "source_id": "dec_llm_grounded_rewrite", "target_id": "asm_grounding_whitelist_complete" },
-{ "type": "conflicts_with", "source_id": "risk_bot_detection", "target_id": "dec_playwright" },
-{ "type": "conflicts_with", "source_id": "risk_dom_drift", "target_id": "dec_per_site_adapters" },
-{ "type": "conflicts_with", "source_id": "risk_session_invalidation", "target_id": "dec_session_storage_state" },
-{ "type": "conflicts_with", "source_id": "risk_tos_account_action", "target_id": "dec_session_storage_state" },
-{ "type": "conflicts_with", "source_id": "risk_llm_outage", "target_id": "dec_llm_hosted" },
-{ "type": "conflicts_with", "source_id": "risk_silent_overnight_failure", "target_id": "obj_overnight_run" },
-{ "type": "conflicts_with", "source_id": "risk_llm_hallucinates_resume", "target_id": "req_no_resume_fabrication" },
-{ "type": "conflicts_with", "source_id": "risk_dedup_misses", "target_id": "req_dedup" },
-{ "type": "conflicts_with", "source_id": "risk_run_exceeds_window", "target_id": "obj_overnight_run" },
-{ "type": "conflicts_with", "source_id": "risk_grounding_too_strict", "target_id": "dec_llm_grounded_rewrite" },
-{ "type": "invalidates", "source_id": "risk_session_invalidation", "target_id": "asm_session_longevity" },
-{ "type": "invalidates", "source_id": "risk_bot_detection", "target_id": "asm_no_midrun_captcha" },
-{ "type": "invalidates", "source_id": "risk_dom_drift", "target_id": "asm_dom_stable" },
-{ "type": "invalidates", "source_id": "risk_llm_hallucinates_resume", "target_id": "asm_grounding_whitelist_complete" },
-{ "type": "verifies", "source_id": "tst_adapter_unit", "target_id": "comp_scraper_engine" },
-{ "type": "verifies", "source_id": "tst_adapter_conformance", "target_id": "iface_scraper_adapter" },
-{ "type": "verifies", "source_id": "tst_orchestrator_integration", "target_id": "comp_orchestrator" },
-{ "type": "verifies", "source_id": "tst_resume_grounding", "target_id": "comp_resume_gen" },
-{ "type": "verifies", "source_id": "tst_resume_cover_grounding", "target_id": "comp_cover_letter_gen" },
-{ "type": "verifies", "source_id": "tst_dedup_property", "target_id": "comp_db" },
-{ "type": "verifies", "source_id": "tst_notifier_always_fires", "target_id": "comp_notifier" },
-{ "type": "verifies", "source_id": "tst_session_expired_signal", "target_id": "comp_session_store" },
-{ "type": "verifies", "source_id": "tst_resume_render_snapshot", "target_id": "comp_pdf_renderer" },
-{ "type": "validates", "source_id": "tst_adapter_conformance", "target_id": "dec_per_site_adapters" },
-{ "type": "validates", "source_id": "tst_resume_grounding", "target_id": "dec_llm_grounded_rewrite" },
-{ "type": "validates", "source_id": "tst_resume_cover_grounding", "target_id": "dec_llm_grounded_rewrite" },
-{ "type": "validates", "source_id": "tst_dedup_property", "target_id": "dec_dedup_multikey" },
-{ "type": "guards_against", "source_id": "tst_adapter_unit", "target_id": "risk_dom_drift" },
-{ "type": "guards_against", "source_id": "tst_adapter_conformance", "target_id": "risk_dom_drift" },
-{ "type": "guards_against", "source_id": "tst_resume_grounding", "target_id": "risk_llm_hallucinates_resume" },
-{ "type": "guards_against", "source_id": "tst_resume_cover_grounding", "target_id": "risk_llm_hallucinates_resume" },
-{ "type": "guards_against", "source_id": "tst_dedup_property", "target_id": "risk_dedup_misses" },
-{ "type": "guards_against", "source_id": "tst_notifier_always_fires", "target_id": "risk_silent_overnight_failure" },
-{ "type": "guards_against", "source_id": "tst_session_expired_signal", "target_id": "risk_session_invalidation" }
-]
-}
-[/GRAPH UPDATE]
-Graph is complete: every major decision has rationale + alternatives, every assumption with confidence < 0.7 is acknowledged, and every risk with severity > 0.6 has either a guard test, a mitigating decision, or an explicit detection signal. Writing the final plan now.
+Incorporating Phase 3: tailoring failures defer the job (pipeline continues), scrape planner consumes DOM/a11y snapshots, PDF via LibreOffice headless in Docker. Fixing the invalid graph edge and emitting the final cumulative graph, then the implementation plan via CreatePlan.
 
+user: can you explain how this runs end to end
 
-user: so could you explain how this runs end to end?
-
-cursor: Here is an end-to-end picture of how a nightly (or manual) run works in this repo.
+cursor: Here is an end-to-end picture of how a run works in this repo.
 1. How you start it
-The main entry is npm run run, which runs tsx src/cli/run.ts (package.json "run" script). That CLI:
-Parses --resume <uuid> (reuse that run id in the DB) and --once (only affects logging today).
-Requires at least one of OPENAI_API_KEY / ANTHROPIC_API_KEY.
-Resolves paths via COND_B_* (or defaults under ./config, ./data, ./profile).
-Builds a logger, LLM client, and webhook notifier from notify.yml, then calls executePipeline.
-run.ts
-Lines 22-48
-On success it posts a summary webhook; on fatal failure it still tries to send a minimal summary.
-2. What executePipeline does (the real “pipeline”)
-executePipeline in src/orchestrator/pipeline.ts is the staged orchestrator.
-Setup
-Reads boards.yml, pipeline.yml, and your JSON Resume from profilePath.
-Opens SQLite, runs Drizzle migrations, then creates a run row if that runId is new.
-Computes a wall-clock deadline from max_runtime_minutes.
-Optionally prunes old dated folders under data/outputs/ using retention_days.
-Browser or not
-It builds runnableBoards: enabled boards that have a known adapter, a search_url, and (if the adapter needs auth) an on-disk Playwright storageState file.
-Playwright is only started when runnableBoards.length > 0. If everything is disabled or missing sessions/URLs, no browser is launched (good for CI/smoke).
-pipeline.ts
-Lines 97-113
-Stage A — Scrape
-For each enabled board: resolve adapter, init per-adapter stats.
-If auth is required but the session file is missing → mark needsRelogin, push to sessionsExpired, send an urgent webhook, skip that board.
-Otherwise ScrapeEngine runs the adapter against search_url / caps, yielding normalized job records. Each row is upserted into SQLite (dedupe / fingerprinting happens in the repo layer). Errors:
-SessionExpiredError → urgent webhook + needsRelogin.
-Other errors → circuit breaker + logRunError.
-Adapter health is written back to the DB per board. Then the browser is stopped in a finally if it was started.
-Stage B — Filter
-Run stage is updated to "filter".
-For every job id seen this run, load the job, scoreJob against the profile, store score/reason on the job row, and collect ids that pass.
-Stage C — Generate
-Run stage → "generate".
-listJobsToGenerate picks jobs that passed filtering, meet filter_min_score, and respects max_generations_per_run (and DB rules about what still needs artifacts).
-For each selected job: insert a generation row, call tailorResumeForJob and tailorCoverForJob (LLM + grounding checks), then writeJobArtifacts (PDFs + sidecar files under data/outputs/<date>/...). Success/failure updates the generation row; failures append to the run summary’s failures.
-Finish
-Builds a RunSummary (per-adapter stats, filter count, generated count, failures, session issues), finishRun persists it, closes SQLite, returns the summary to the CLI → summary webhook.
-pipeline.ts
-Lines 229-319
-3. How that fits with the rest of the “product”
-npm run login -- linkedin|wellfound: one-time (or occasional) headed login; writes storageState JSON so auth-walled boards can be “runnable.”
-npm run bootstrap: builds/refines profile/master.json from a resume file (separate from the nightly scrape loop).
-Scheduling: same Node process (npm run run) from cron, launchd, or docker compose run pipeline — the in-process behavior is identical; only the wrapper changes.
-So end-to-end: config + profile + optional session files → run CLI → migrate + run record → optional Playwright scrape per board → SQLite jobs → score/filter → LLM-tailored PDFs + artifacts on disk → DB completion + webhooks. Nothing in this path auto-submits applications; outputs are for your review.
+jobpipe run (or jobpipe run --offline) loads settings from env / .env via get_settings(), optionally forces offline=True, then calls run_pipeline(s)
+( lines 14–24).
+jobpipe refresh-auth is separate: headed Playwright saves storageState JSON under JOBPIPE_SECRETS_DIR for ChatGPT / LinkedIn / Wellfound so later runs can reuse sessions ( refresh-auth).
+jobpipe doctor only checks paths, profile file, template, LibreOffice, DB — it does not run the pipeline.
+2. One DB transaction for the whole run
+run_pipeline opens a single SQLAlchemy session with session_scope(settings): create engine → create_all tables → yield session → commit on success or rollback on error 1. So the whole pipeline is one committed unit unless something raises.
+Inside that scope it:
+Inserts a pipeline_runs row (running, then completed at the end).
+Builds shared objects: ChatGPTUIClient, ScrapePlanner, loads UserProfile from config/profile.yaml, and ScrapeContext (settings + session + run id + profile + planner) ( 52–67).
+3. Stage A — Ingest (scrape → normalize → upsert)
+For each site in fixed order linkedin → wellfound → ats_greenhouse 2:
+If the circuit breaker is open for that site, ingest is skipped and a scrape event is logged ( 69–73).
+Otherwise it calls that site module’s discover(ctx) inside with_backoff (retries with exponential backoff) ( 74–80, ).
+Each site’s discover (see e.g. LinkedIn/Wellfound/ATS modules) typically: get HTML (fixtures + bundled plan when offline; Playwright + optional storageState when not), build a page capture, ask ScrapePlanner for a JSON scrape plan (ChatGPT UI if chatgpt.json exists, else bundled plan JSON), run the offline executor on the HTML to get rows, map rows to NormalizedJob, return a list.
+Each normalized job is upsert_job into SQLite by dedupe key (updates in place if the listing already exists) 3.
+Success/failure updates circuit state and scrape_events; each site ends with a checkpoints row for ingest ( 81–94).
+4. Stage B — Relevance
+Selects jobs where relevance_score is still NULL (up to 2000), runs apply_relevance_to_session (score + explanation JSON + relevant flag vs profile and threshold), records job_processing for stage relevance, flushes, checkpoint ( 98–105).
+5. Stage C — Tailor
+Eligible jobs: relevance_score is not null and ≥ relevance_threshold ( 110–114).
+If a job already has tailored_artifact_json and tailored_for_content_hash == content_hash, it is skipped (idempotent re-run).
+Otherwise:
+If offline OR no ChatGPT storage file → offline_stub_tailored (deterministic JSON that passes the tailored-artifact schema).
+Else → build_tailoring_prompt + chatgpt.request_tailored_artifact (Playwright on chatgpt.com, parse JSON, validate schema).
+On success: JSON stored on the job row, defer fields cleared, job_processing tailor/done.
+On failure: defer_reason / defer_detail, tailor/deferred — pipeline continues ( 114–139).
+6. Stage D — Render (DOCX + PDF)
+Ensures templates/resume.docx exists (creates a minimal template if missing).
+Same eligible jobs; skips if defer_reason set or no tailored JSON; skips if this run already has a resume_pdf artifact (duplicate guard).
+render_resume_docx_pdf: docxtpl render → save DOCX under artifacts/run_<id>/ → soffice --headless to PDF; artifacts rows for resume_docx and resume_pdf ( 143–189).
+7. Stage E — Packet
+Again eligible jobs with tailored JSON and no defer; write_packet writes job_<id>_packet.md under the same run folder and records an artifacts row packet_md ( 192–205).
+8. Finish
+Updates pipeline_runs: finished_at, status=completed, summary_json.
+Writes artifacts/run_<id>_report.md from the in-memory summary dict.
+Returns that summary dict to the CLI, which prints JSON to stdout ( 208–215, 24–25).
+Mental model: one command → one DB transaction → ordered stages (ingest all boards → score unscored jobs → tailor high scorers → PDF + markdown packets) → SQLite is the source of truth for jobs/runs/artifacts; the filesystem holds DOCX/PDF/MD under JOBPIPE_ARTIFACTS_DIR.
+Docker: same entrypoint: container default CMD is run, so docker compose run … jobpipe run is the same run_pipeline path with paths coming from env/volume mounts described in .
 
-user: so for generating packets, LLMs are called. what about for scoring and filtering?
+user: and to clarify, is the scoring and packet generation LLM assisted?
 
-cursor: Scoring and filtering do not call the LLM. They are plain TypeScript heuristics over structured Job data plus your UserProfile (x_preferences).
-Hard filter — hardExclude in src/filter/rules.ts scans job.title + job.descriptionText (lowercased) for any exclude_keywords from the profile. If one matches, the job fails immediately with reason like exclude_keyword:….
-rules.ts
-Lines 4-11
-Score — If not excluded, scoreJob in src/filter/score.ts adds weighted signals: substring overlap with profile skills in title+description, title match against target_roles, remote_pref vs job.remote, location list vs job.location, and a simple seniority guess from keywords in title+description vs x_preferences.seniority. It sums those into a score, caps at 100, and sets pass when score >= 40 (that 40 is fixed in code, not the LLM).
-score.ts
-Lines 76-92
-export function scoreJob(job: Job, profile: UserProfile): FilterResult {
-  const ex = hardExclude(job, profile);
-  if (ex) return { pass: false, score: 0, reason: ex };
-  let score = 0;
-  score += skillOverlap(job, profile);
-  score += roleMatch(job, profile);
-  score += remoteMatch(job, profile);
-  score += locationMatch(job, profile);
-  score += senioritySignal(job, profile);
-  const pass = score >= 40;
-  return {
-    pass,
-    score: Math.round(Math.min(100, score)),
-    reason: pass ? "ok" : "below_threshold",
-  };
-}
-The generation step later uses pipeline.filter_min_score from config/pipeline.yml (default 40 in loadYaml.ts) when listJobsToGenerate picks which passed jobs get packets—still no LLM for that selection; the LLM is only for tailoring resume/cover content inside tailorResumeForJob / tailorCoverForJob.
+cursor: No for scoring. Relevance is fully rule-based: substring checks for profile skills, role titles, must_have / avoid, a small seniority heuristic, and a numeric score — no ChatGPT or other LLM in .
+Packet generation itself is not LLM-assisted. only formats the already-produced tailored dict into Markdown (headers, cover_letter_paragraphs, form_answers). It does not call any model.
+Where the LLM can appear: the tailoring step can be LLM-assisted: if you are not in --offline mode and secrets/chatgpt.json exists, the pipeline uses the ChatGPT web UI to produce the JSON artifact that later drives both resume rendering and the packet ( tailor branch). Otherwise it uses the offline stub JSON, so the packet text is stub copy, not from an LLM.
+Related: Scrape planning can also use the same ChatGPT client when storage exists; otherwise it falls back to bundled JSON plans 1. That is separate from relevance scoring.
