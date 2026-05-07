@@ -1,0 +1,471 @@
+{
+  "nodes": [
+    {
+      "id": "obj_symptom_tracking",
+      "type": "objective",
+      "label": "User Symptom Tracking",
+      "description": "Users can log their asthma severity and specific symptoms."
+    },
+    {
+      "id": "obj_predictive_insights",
+      "type": "objective",
+      "label": "Predictive Flare-Up Insights",
+      "description": "The system should predict when a user's asthma might worsen based on various data points."
+    },
+    {
+      "id": "obj_proactive_advice",
+      "type": "objective",
+      "label": "Proactive AI-Powered Advice",
+      "description": "An LLM-backed advisor provides proactive advice during high-risk periods."
+    },
+    {
+      "id": "req_data_persistence",
+      "type": "requirement",
+      "label": "Persistent Data Storage",
+      "description": "All user-generated data, including symptoms and logs, must be saved in a persistent database.",
+      "is_functional": true
+    },
+    {
+      "id": "req_calendar_sync",
+      "type": "requirement",
+      "label": "One-Way Calendar Push",
+      "description": "Enable a one-way push of high-risk alerts from the platform to a user's external calendar (e.g., Google Calendar).",
+      "is_functional": true
+    },
+    {
+      "id": "req_unattended_operation",
+      "type": "requirement",
+      "label": "Unattended Operation with Error Recovery",
+      "description": "The system must run unattended with full error recovery, requiring no human intervention once started.",
+      "is_functional": false
+    },
+    {
+      "id": "req_mock_data",
+      "type": "requirement",
+      "label": "Initial Mock Data",
+      "description": "The system must include mock symptom data for initial model training and test user data.",
+      "is_functional": true
+    },
+    {
+      "id": "req_medical_disclaimer",
+      "type": "requirement",
+      "label": "Clear Medical Disclaimer",
+      "description": "The application must display a clear, concise disclaimer stating that it is not a substitute for professional medical advice and that users should consult a doctor.",
+      "is_functional": true
+    },
+    {
+      "id": "req_phi_compliance",
+      "type": "requirement",
+      "label": "PHI/HIPAA Compliance",
+      "description": "The system must be designed to be compliant with regulations for handling Personal Health Information (e.g., HIPAA), as it is intended for both personal and commercial use.",
+      "is_functional": false
+    },
+    {
+      "id": "asm_api_availability",
+      "type": "assumption",
+      "label": "Availability of External APIs",
+      "description": "Assumes that external APIs for weather, air quality, and the LLM are consistently available and reliable.",
+      "confidence": 0.7,
+      "validated": false
+    },
+    {
+      "id": "risk_privacy_compliance",
+      "type": "risk",
+      "label": "Privacy and Health Data Compliance",
+      "description": "Handling sensitive personal health information (PHI) for a commercial product introduces significant legal and ethical risks (e.g., HIPAA). A data breach could have severe consequences.",
+      "severity": 0.9
+    },
+    {
+      "id": "risk_medical_liability",
+      "type": "risk",
+      "label": "Medical Advice Liability",
+      "description": "Providing incorrect or misinterpreted medical advice could lead to adverse health outcomes for users and legal liability for the platform.",
+      "severity": 1.0
+    },
+    {
+      "id": "risk_free_api_limits",
+      "type": "risk",
+      "label": "Free Tier API Limitations",
+      "description": "Free APIs for weather and air quality often have strict rate limits, lower data accuracy, and no guarantee of service, which could degrade the predictive model's quality.",
+      "severity": 0.6
+    },
+    {
+      "id": "dec_frontend_react",
+      "type": "decision",
+      "label": "Use React (with Vite) for Frontend",
+      "description": "The web application's user interface will be a single-page application (SPA) built using the React library and Vite for the build tooling.",
+      "rationale": "React is a widely adopted, flexible library for building user interfaces. Using it as a SPA separates concerns cleanly from the backend API. Vite provides a fast and modern development experience.",
+      "alternatives_considered": [
+        "Next.js (rejected by user)",
+        "Angular",
+        "Vue.js"
+      ]
+    },
+    {
+      "id": "dec_backend_fastapi",
+      "type": "decision",
+      "label": "Use FastAPI for Backend",
+      "description": "The backend API will be developed using FastAPI, a modern Python web framework.",
+      "rationale": "FastAPI is chosen for its high performance, asynchronous capabilities, and strong integration with Python's data science and machine learning libraries (like Scikit-learn, Pandas), which are essential for the predictive model.",
+      "alternatives_considered": [
+        "Django REST Framework",
+        "Flask"
+      ]
+    },
+    {
+      "id": "dec_db_postgresql",
+      "type": "decision",
+      "label": "Use PostgreSQL for Database",
+      "description": "PostgreSQL will be the primary database for storing all application data, including user info and symptom logs.",
+      "rationale": "PostgreSQL is a robust, open-source, and highly scalable relational database with strong security features suitable for handling sensitive PHI and meeting compliance requirements for a commercial application.",
+      "alternatives_considered": [
+        "MySQL",
+        "MongoDB"
+      ]
+    },
+    {
+      "id": "dec_free_tier_apis",
+      "type": "decision",
+      "label": "Use Free Tier External APIs",
+      "description": "The system will use free or free-tier APIs for external data, such as OpenWeatherMap for weather and OpenAQ for air quality.",
+      "rationale": "This approach minimizes initial operational costs, which is suitable for the early stages of a project. The system should be designed to easily swap providers if needed.",
+      "alternatives_considered": [
+        "Paid/Premium APIs (e.g., AccuWeather, IQAir)"
+      ]
+    },
+    {
+      "id": "dec_auth_oauth2_jwt",
+      "type": "decision",
+      "label": "Use OAuth 2.0 and JWT for Auth",
+      "description": "API authentication will be handled using the OAuth 2.0 protocol, with JWTs issued to clients to authorize access to protected endpoints.",
+      "rationale": "This is a secure, industry-standard approach for web and mobile applications that is well-supported and essential for protecting sensitive user data (PHI).",
+      "alternatives_considered": [
+        "Session-based authentication",
+        "API Keys"
+      ]
+    },
+    {
+      "id": "dec_scheduler_celery_redis",
+      "type": "decision",
+      "label": "Use Celery and Redis for Task Scheduling",
+      "description": "Background tasks (data ingestion, model training) will be managed and executed by Celery workers, using Redis as the message broker.",
+      "rationale": "Celery is a robust and scalable distributed task queue for Python, ideal for handling the required unattended operations. Redis is a fast, reliable, and commonly used broker for Celery.",
+      "alternatives_considered": [
+        "Cron jobs",
+        "Dramatiq"
+      ]
+    },
+    {
+      "id": "dec_llm_openai",
+      "type": "decision",
+      "label": "Use OpenAI API for AI Advisor",
+      "description": "The AI advisor character will be powered by an OpenAI GPT model via their API.",
+      "rationale": "OpenAI provides powerful, general-purpose language models that are well-suited for generating conversational and context-aware advice. Their APIs are mature and well-documented.",
+      "alternatives_considered": [
+        "Google Gemini",
+        "Anthropic Claude"
+      ]
+    },
+    {
+      "id": "dec_containerization_docker",
+      "type": "decision",
+      "label": "Use Docker for Containerization",
+      "description": "All services (frontend, backend, workers, database) will be containerized using Docker.",
+      "rationale": "Docker provides a consistent, isolated, and reproducible environment for development, testing, and production, simplifying deployment and scaling.",
+      "alternatives_considered": [
+        "Bare-metal deployment",
+        "Virtual Machines"
+      ]
+    },
+    {
+      "id": "dec_error_monitoring_sentry",
+      "type": "decision",
+      "label": "Use Sentry for Error Monitoring",
+      "description": "The application will be integrated with Sentry to provide real-time error tracking and reporting for both the frontend and backend.",
+      "rationale": "Sentry offers detailed error reports, alerts, and performance monitoring, which are critical for maintaining a reliable, unattended system.",
+      "alternatives_considered": [
+        "Datadog",
+        "LogRocket"
+      ]
+    },
+    {
+      "id": "comp_frontend_app",
+      "type": "component",
+      "label": "React Frontend Application",
+      "description": "A Single-Page Application (SPA) that provides the user interface for symptom logging, data visualization, and viewing AI advisor messages.",
+      "has_tests": true
+    },
+    {
+      "id": "comp_backend_api",
+      "type": "component",
+      "label": "FastAPI Backend Server",
+      "description": "The central API server that handles business logic, user authentication, data persistence, and communication with external services.",
+      "has_tests": true
+    },
+    {
+      "id": "comp_prediction_service",
+      "type": "component",
+      "label": "Prediction Service",
+      "description": "A service within the backend responsible for training and running the predictive model. It fetches user history, weather, and air quality data to generate flare-up risk scores.",
+      "has_tests": true
+    },
+    {
+      "id": "comp_advisor_service",
+      "type": "component",
+      "label": "AI Advisor Service",
+      "description": "A service that connects to an external LLM API. It uses the prediction service's output to generate and deliver proactive, personalized advice to the user."
+    },
+    {
+      "id": "comp_data_ingestion_service",
+      "type": "component",
+      "label": "Data Ingestion Service",
+      "description": "A background service responsible for periodically fetching data from external weather and air quality APIs and storing it in the database."
+    },
+    {
+      "id": "comp_calendar_service",
+      "type": "component",
+      "label": "Calendar Integration Service",
+      "description": "A service that handles OAuth and API interactions with external calendar providers (e.g., Google Calendar) to push high-risk event notifications."
+    },
+    {
+      "id": "comp_auth_service",
+      "type": "component",
+      "label": "Authentication Service",
+      "description": "A service within the backend that manages user registration, login, and the issuance/validation of JWTs based on the OAuth 2.0 flow."
+    },
+    {
+      "id": "comp_task_queue",
+      "type": "component",
+      "label": "Celery Task Queue",
+      "description": "The distributed task queue system that schedules and executes background jobs like data ingestion and model prediction runs."
+    },
+    {
+      "id": "comp_redis_broker",
+      "type": "component",
+      "label": "Redis Message Broker",
+      "description": "The message broker that facilitates communication between the main backend application and the Celery workers."
+    },
+    {
+      "id": "iface_rest_api",
+      "type": "interface",
+      "label": "Main REST API",
+      "description": "The primary RESTful interface exposed by the backend server for the frontend application to consume. It includes endpoints for authentication, symptom logging, and retrieving predictions."
+    },
+    {
+      "id": "tst_unit_tests",
+      "type": "test",
+      "label": "Unit Tests",
+      "description": "Unit tests will be written for individual functions and components in isolation to verify their correctness.",
+      "test_type": "unit",
+      "status": "planned"
+    },
+    {
+      "id": "tst_integration_tests",
+      "type": "test",
+      "label": "Integration Tests",
+      "description": "Integration tests will verify that different components of the system work together as expected (e.g., API endpoint calls the correct service).",
+      "test_type": "integration",
+      "status": "planned"
+    },
+    {
+      "id": "tst_e2e_tests",
+      "type": "test",
+      "label": "End-to-End Tests",
+      "description": "E2E tests will simulate real user workflows from the browser to ensure the entire system functions correctly.",
+      "test_type": "end-to-end",
+      "status": "planned"
+    }
+  ],
+  "edges": [
+    {
+      "source_id": "req_data_persistence",
+      "target_id": "obj_symptom_tracking",
+      "type": "motivated_by"
+    },
+    {
+      "source_id": "req_calendar_sync",
+      "target_id": "obj_predictive_insights",
+      "type": "motivated_by"
+    },
+    {
+      "source_id": "req_mock_data",
+      "target_id": "obj_predictive_insights",
+      "type": "motivated_by"
+    },
+    {
+      "source_id": "req_medical_disclaimer",
+      "target_id": "risk_medical_liability",
+      "type": "guards_against"
+    },
+    {
+      "source_id": "risk_privacy_compliance",
+      "target_id": "req_data_persistence",
+      "type": "conflicts_with"
+    },
+    {
+      "source_id": "risk_medical_liability",
+      "target_id": "obj_proactive_advice",
+      "type": "conflicts_with"
+    },
+    {
+      "source_id": "dec_db_postgresql",
+      "target_id": "req_data_persistence",
+      "type": "motivated_by"
+    },
+    {
+      "source_id": "dec_db_postgresql",
+      "target_id": "req_phi_compliance",
+      "type": "motivated_by"
+    },
+    {
+      "source_id": "dec_backend_fastapi",
+      "target_id": "obj_predictive_insights",
+      "type": "motivated_by"
+    },
+    {
+      "source_id": "dec_backend_fastapi",
+      "target_id": "obj_proactive_advice",
+      "type": "motivated_by"
+    },
+    {
+      "source_id": "dec_frontend_react",
+      "target_id": "obj_symptom_tracking",
+      "type": "motivated_by"
+    },
+    {
+      "source_id": "dec_free_tier_apis",
+      "target_id": "obj_predictive_insights",
+      "type": "motivated_by"
+    },
+    {
+      "source_id": "risk_free_api_limits",
+      "target_id": "dec_free_tier_apis",
+      "type": "conflicts_with"
+    },
+    {
+      "source_id": "dec_auth_oauth2_jwt",
+      "target_id": "req_phi_compliance",
+      "type": "motivated_by"
+    },
+    {
+      "source_id": "dec_scheduler_celery_redis",
+      "target_id": "req_unattended_operation",
+      "type": "motivated_by"
+    },
+    {
+      "source_id": "dec_llm_openai",
+      "target_id": "comp_advisor_service",
+      "type": "motivated_by"
+    },
+    {
+      "source_id": "dec_containerization_docker",
+      "target_id": "req_unattended_operation",
+      "type": "motivated_by"
+    },
+    {
+      "source_id": "dec_error_monitoring_sentry",
+      "target_id": "req_unattended_operation",
+      "type": "motivated_by"
+    },
+    {
+      "source_id": "comp_frontend_app",
+      "target_id": "dec_frontend_react",
+      "type": "implements"
+    },
+    {
+      "source_id": "comp_frontend_app",
+      "target_id": "iface_rest_api",
+      "type": "consumes"
+    },
+    {
+      "source_id": "comp_backend_api",
+      "target_id": "dec_backend_fastapi",
+      "type": "implements"
+    },
+    {
+      "source_id": "comp_backend_api",
+      "target_id": "iface_rest_api",
+      "type": "exposes"
+    },
+    {
+      "source_id": "comp_backend_api",
+      "target_id": "dec_db_postgresql",
+      "type": "depends_on"
+    },
+    {
+      "source_id": "comp_prediction_service",
+      "target_id": "comp_backend_api",
+      "type": "depends_on"
+    },
+    {
+      "source_id": "comp_advisor_service",
+      "target_id": "comp_backend_api",
+      "type": "depends_on"
+    },
+    {
+      "source_id": "comp_data_ingestion_service",
+      "target_id": "comp_backend_api",
+      "type": "depends_on"
+    },
+    {
+      "source_id": "comp_calendar_service",
+      "target_id": "comp_backend_api",
+      "type": "depends_on"
+    },
+    {
+      "source_id": "comp_prediction_service",
+      "target_id": "comp_data_ingestion_service",
+      "type": "depends_on"
+    },
+    {
+      "source_id": "comp_advisor_service",
+      "target_id": "comp_prediction_service",
+      "type": "depends_on"
+    },
+    {
+      "source_id": "comp_auth_service",
+      "target_id": "comp_backend_api",
+      "type": "depends_on"
+    },
+    {
+      "source_id": "comp_auth_service",
+      "target_id": "dec_auth_oauth2_jwt",
+      "type": "implements"
+    },
+    {
+      "source_id": "comp_task_queue",
+      "target_id": "dec_scheduler_celery_redis",
+      "type": "implements"
+    },
+    {
+      "source_id": "comp_task_queue",
+      "target_id": "comp_redis_broker",
+      "type": "depends_on"
+    },
+    {
+      "source_id": "comp_data_ingestion_service",
+      "target_id": "comp_task_queue",
+      "type": "depends_on"
+    },
+    {
+      "source_id": "comp_prediction_service",
+      "target_id": "comp_task_queue",
+      "type": "depends_on"
+    },
+    {
+      "source_id": "tst_unit_tests",
+      "target_id": "comp_prediction_service",
+      "type": "verifies"
+    },
+    {
+      "source_id": "tst_integration_tests",
+      "target_id": "comp_backend_api",
+      "type": "verifies"
+    },
+    {
+      "source_id": "tst_e2e_tests",
+      "target_id": "comp_frontend_app",
+      "type": "verifies"
+    }
+  ]
+}
