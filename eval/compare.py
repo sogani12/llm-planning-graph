@@ -4,8 +4,8 @@ Generates a comparison table across all completed experiments.
 Usage:
     python eval/compare.py
 
-For each experiment with a condition_b/graph_final.json, counts node types
-and prints a markdown summary table.
+For each experiment, looks for condition_b/graph_final.json first,
+then falls back to condition_b/graph.json.
 """
 from __future__ import annotations
 
@@ -33,12 +33,15 @@ def main() -> None:
     rows = []
     for project in projects:
         name = project.name
-        graph_path = project / "condition_b" / "graph_final.json"
+        cond_b = project / "condition_b"
+        graph_path = cond_b / "graph_final.json"
+        if not graph_path.exists():
+            graph_path = cond_b / "graph.json"
 
         if not graph_path.exists():
             rows.append({
                 "project": name,
-                "status": "condition_b/graph_final.json missing",
+                "status": "no graph found in condition_b",
                 "nodes": {},
                 "total_nodes": 0,
                 "total_edges": 0,
