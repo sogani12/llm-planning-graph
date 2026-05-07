@@ -321,7 +321,6 @@ Rules:
 
 **User**
 
-Look at graph_v1.json and update that.
 Yes, keep legal contraints in mind, use SQLite, no preference on the LLM approach
 
 ---
@@ -581,8 +580,7 @@ Updated `condition_b/graph_v1.json` with your decisions:
 
 **User**
 
-Look at graph_v2.json and update that.
-Yes include a lghtweight feedback loop, add automatic source quarantine, run the policy daily
+Yes include a lightweight feedback loop, add automatic source quarantine, run the policy daily
 
 ---
 
@@ -1427,7 +1425,6 @@ Applied your answers to `condition_b/graph_v3.json` and encoded each as explicit
 
 **User**
 
-Look at graph_v4.json and update the graph. 
 Keep a 50 votes threshold, set any N for approvals, and choose what you want to do for test mitigation edges
 
 ---
@@ -1843,7 +1840,7 @@ Updated `condition_b/graph_v4.json` with your requested choices:
 
 **User**
 
-Proceed to the final plan
+Yes, proceed to the final plan
 
 ---
 
