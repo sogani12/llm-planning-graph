@@ -1,33 +1,8 @@
-"""
-LLM-based decision graph extraction from unstructured text.
-
-Given a completed developer-AI conversation or project document, prompts Claude
-to extract nodes and edges according to the schema in schema.py.
-
-Note: this is for post-hoc batch extraction from a finished conversation.
-For live graph-augmented planning (Condition B), see the system prompt at
-planninggraph/prompts/extraction_system.txt.
-
-Usage (automated, requires ANTHROPIC_API_KEY):
-    from planninggraph.extractor import extract_graph
-    graph = extract_graph(text)
-
-Usage (manual, no API key needed):
-    Print the system prompt with print_extraction_prompt(), paste it into a Claude
-    chat session as the system prompt, then paste your text as the user message.
-    Copy the JSON response and load it with DecisionGraph.model_validate_json(json_str).
-"""
-
 from __future__ import annotations
-
 import json
 import os
 import re
-
 from planninggraph.schema import DecisionGraph
-
-# Inline extraction prompt — separate from the Condition B planning system prompt
-# (planninggraph/prompts/extraction_system.txt), which is used by the live planning agent.
 _EXTRACTION_PROMPT = """\
 You are an expert software architecture analyst. Read the developer–AI planning \
 conversation or design document below and extract a structured decision graph from it.
@@ -61,8 +36,7 @@ Rules:
 - Aim for 15–25 nodes. Completeness over brevity.
 """
 
-
-def print_extraction_prompt() -> None:
+def print_extraction_prompt():
     """Print the extraction prompt for manual use in a Claude chat session."""
     print("=" * 70)
     print("EXTRACTION PROMPT — paste as system prompt in a Claude chat session")
@@ -70,21 +44,12 @@ def print_extraction_prompt() -> None:
     print(_EXTRACTION_PROMPT)
 
 
-def _parse_graph(raw: str) -> DecisionGraph:
-    """Parse raw LLM response into a DecisionGraph, stripping markdown if present."""
-    # Strip markdown code fences if the model wrapped the JSON
+def _parse_graph(raw):
     clean = re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=re.IGNORECASE)
     clean = re.sub(r"\s*```$", "", clean.strip())
     return DecisionGraph.model_validate(json.loads(clean))
 
-
-def extract_graph(text: str, model: str = "claude-sonnet-4-6") -> DecisionGraph:
-    """
-    Extract a DecisionGraph from unstructured text via the Anthropic API.
-
-    Requires ANTHROPIC_API_KEY to be set in the environment.
-    If the key is not set, raises EnvironmentError with instructions for manual use.
-    """
+def extract_graph(text, model = "claude-sonnet-4-6"):
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         raise EnvironmentError(
@@ -95,16 +60,13 @@ def extract_graph(text: str, model: str = "claude-sonnet-4-6") -> DecisionGraph:
             "Then paste the printed prompt as the system prompt in a Claude chat,\n"
             "paste your text as the user message, and copy the JSON response."
         )
-
     try:
         import anthropic
     except ImportError:
         raise ImportError("anthropic package not installed. Run: pip install anthropic")
-
     client = anthropic.Anthropic(api_key=api_key)
     system_prompt = _EXTRACTION_PROMPT
-
-    def _call(user_content: str) -> str:
+    def _call(user_content):
         response = client.messages.create(
             model=model,
             max_tokens=4096,
@@ -112,10 +74,7 @@ def extract_graph(text: str, model: str = "claude-sonnet-4-6") -> DecisionGraph:
             messages=[{"role": "user", "content": user_content}],
         )
         return response.content[0].text
-
     raw = _call(text)
-
-    # Retry once with a repair prompt if the JSON is invalid
     try:
         return _parse_graph(raw)
     except (json.JSONDecodeError, Exception) as first_err:
