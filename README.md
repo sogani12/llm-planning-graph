@@ -68,4 +68,4 @@ demo/
 | Sogani & Garey | Graph schema + extraction pipeline |
 | Motonishi & Konduru | Data collection + annotation |
 | Sehgal | Living plan maintenance + blast radius |
-| Khade | Baselines, Stage 2 eval, integration |
+| Omkar Khade | Baselines, Stage 2 eval, integration |
