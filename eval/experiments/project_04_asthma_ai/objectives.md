@@ -1,4 +1,4 @@
-# Evaluation Rubric — Asthma Advisor Planning (Revised)
+# Evaluation Rubric — Asthma Advisor Planning
 
 Each objective is scored independently for Condition A and Condition B.
 Score: 0 = not addressed | 0.5 = partially addressed | 1 = fully addressed
@@ -7,7 +7,7 @@ These scores are based on prompt fidelity and concrete planning, not documentati
 
 ---
 
-## Functional Objectives (expected from both conditions — all address the prompt requirements directly)
+## Functional Objectives
 
 | # | Objective | Criterion | A score | B score | Notes |
 |---|-----------|-----------|---------|---------|-------|
@@ -21,7 +21,7 @@ These scores are based on prompt fidelity and concrete planning, not documentati
 | 8 | **Clarifying questions target actual ambiguities in the prompt** | Agent asks about: stack choices, sync direction/scope, liability/PHI scope, data volume, deployment constraints. Questions about UI color or naming = 0 or 0.5. | 0.5 | 1 | A asked about stack/API design—reasonable but generic. B asked specifically about liability framing, commercial use, sync direction, and API cost constraints—directly resolving prompt ambiguities. |
 | 9 | **Testing strategy is concrete and covers key risks** | Plan specifies: (a) unit tests for prediction model (threshold logic, data pipeline), (b) integration tests for calendar sync, (c) UI/E2E tests for advisor flow, (d) failure scenarios (API downtime, bad data). Vague "we'll test" or no mention = 0 or 0.5. | 0 | 0 | A does not mention testing strategy. B does not mention testing strategy. This is a critical gap in both conversations. |
 
-## Quality Objectives (expected from both conditions — show rigor beyond addressing requirements)
+## Quality Objectives
 
 | # | Objective | Criterion | A score | B score | Notes |
 |---|-----------|-----------|---------|---------|-------|
@@ -37,7 +37,11 @@ These scores are based on prompt fidelity and concrete planning, not documentati
 |--------|-------------|-------------|
 | Functional objectives hit (out of 9) | 4.5 / 9 | 7.5 / 9 |
 | Quality objectives hit (out of 3) | 1.0 / 3 | 3.0 / 3 |
-| **Total score (out of 12)** | **5.0 / 12** | **10.0 / 12** |
+| Total decision nodes in plan | 0 (no graph) | 10 |
+| Total assumption nodes surfaced | 0 (no graph) | 1 |
+| Total risk nodes surfaced | 0 (no graph) | 3 |
+| Graph nodes total | — | 35 |
+| Graph edges total | — | 38 |
 
 ---
 
