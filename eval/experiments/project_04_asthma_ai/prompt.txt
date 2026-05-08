@@ -1,0 +1,11 @@
+Ask any clarifying questions you need before planning.
+
+Build an asthma symptom tracker and AI medical advisor web app with the following capabilities:
+
+- Users can log their asthma severity on a scale of 1 to 10 and specify the types of symptoms they are experiencing.
+- Save all data into a persistent database. Enable users to sync their calendar apps with the platform.
+- Build a model to predict when a user's asthma might worsen based on historical symptom data, weather conditions, and air quality.
+- Include a supportive asthma advisor character backed by LLM API that provides proactive advice when flare-up risks are high (e.g., "The air quality is poor today; please wear a mask").
+- Ensure the system runs unattended with full error recovery—no human intervention should be required once the process starts.
+- Include mock asthma symptom data and use it to train the initial predictive model.
+- Include testing data for a few users, encompassing past symptoms, user demographics, and login credentials.

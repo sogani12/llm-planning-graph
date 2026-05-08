@@ -1,0 +1,352 @@
+## IMPLEMENTATION PLAN: Asthma Symptom Tracker & AI Advisor
+
+### 1. PROJECT STRUCTURE
+
+```
+asthma-tracker/
+├── backend/
+│   ├── app/
+│   │   ├── __init__.py
+│   │   ├── main.py                 # FastAPI app
+│   │   ├── config.py               # Settings, env vars
+│   │   ├── models.py               # SQLAlchemy ORM models
+│   │   ├── schemas.py              # Pydantic request/response schemas
+│   │   ├── database.py             # DB connection, session management
+│   │   ├── auth.py                 # Google OAuth middleware
+│   │   ├── routes/
+│   │   │   ├── auth.py             # POST /auth/google, /auth/refresh
+│   │   │   ├── logs.py             # POST /logs, GET /logs/{user_id}
+│   │   │   ├── predictions.py      # GET /predictions/{user_id}
+│   │   │   └── calendar.py         # POST /calendar/sync, GET /calendar/status
+│   │   └── utils/
+│   │       ├── exceptions.py       # Custom exceptions (with context logging)
+│   │       ├── logger.py           # Structured JSON logging
+│   │       └── retry.py            # Exponential backoff decorator
+│   ├── ml/
+│   │   ├── __init__.py
+│   │   ├── model.py                # RandomForest flare-up predictor
+│   │   ├── features.py             # Feature engineering (symptom history, weather, AQ)
+│   │   ├── training.py             # Model training on accumulated logs
+│   │   └── mock_data.py            # Generate 100+ synthetic logs for 3 test users
+│   ├── services/
+│   │   ├── __init__.py
+│   │   ├── weather.py              # OpenWeatherMap API wrapper (with caching)
+│   │   ├── air_quality.py          # AirNow/IQAir API wrapper (with caching)
+│   │   ├── calendar.py             # Google Calendar API wrapper
+│   │   └── advisor.py              # Warm advice generator (templates + simple rules)
+│   ├── tasks/
+│   │   ├── __init__.py
+│   │   ├── celery_app.py           # Celery app + Redis config
+│   │   ├── prediction_job.py       # Predict flare-ups for all users (daily 8 AM)
+│   │   ├── calendar_sync_job.py    # Sync to Google Calendar (daily 9 AM)
+│   │   ├── retrain_job.py          # Retrain model (weekly Monday midnight)
+│   │   └── error_handlers.py       # Celery DLQ, retry logic
+│   ├── tests/
+│   │   ├── conftest.py             # pytest fixtures
+│   │   ├── test_ml_model.py        # Unit tests for ML
+│   │   ├── test_log_ingestion.py   # Integration: log → API → DB
+│   │   ├── test_prediction.py      # Integration: prediction with mocked weather
+│   │   ├── test_auth.py            # E2E: OAuth flow
+│   │   ├── test_calendar_sync.py   # Integration: calendar sync
+│   │   ├── test_graceful_degradation.py  # Integration: API failures
+│   │   └── test_schema_conformance.py    # Conformance: API schemas
+│   ├── requirements.txt            # Python dependencies
+│   ├── docker-compose.yml          # Redis + SQLite (local dev)
+│   └── supervisord.conf            # Process supervisor config
+├── frontend/
+│   ├── src/
+│   │   ├── components/
+│   │   │   ├── LogForm.tsx         # Severity + symptom picker
+│   │   │   ├── PredictionCard.tsx  # Display risk + advice
+│   │   │   ├── AdvisorWidget.tsx   # "Cute" mascot + message
+│   │   │   ├── CalendarSync.tsx    # Sync status + button
+│   │   │   └── Dashboard.tsx       # Main layout
+│   │   ├── pages/
+│   │   │   ├── Login.tsx           # Google OAuth redirect
+│   │   │   ├── Home.tsx            # Main dashboard
+│   │   │   └── Settings.tsx        # User preferences
+│   │   ├── hooks/
+│   │   │   ├── useAuth.ts          # Auth context
+│   │   │   └── useAPI.ts           # API client
+│   │   ├── App.tsx
+│   │   └── index.tsx
+│   ├── package.json
+│   ├── tsconfig.json
+│   └── .env.example
+├── README.md
+├── docker-compose.yml              # Full stack orchestration
+└── startup.sh                      # Bootstrap script (init DB, train model, start services)
+```
+
+---
+
+### 2. TECH STACK (with versions)
+
+**Backend:**
+- Python 3.10+
+- FastAPI 0.104+
+- SQLAlchemy 2.0+ with SQLite
+- Pydantic 2.0+
+- Celery 5.3+ with Redis
+- scikit-learn 1.3+
+- pandas 2.0+
+- requests 2.31+ (with retry)
+- google-auth-oauthlib 1.1+
+- google-api-python-client 2.101+
+- python-dotenv 1.0+
+- Uvicorn 0.24+
+
+**Frontend:**
+- React 18+
+- TypeScript 5.0+
+- Chakra UI 2.8+ (warm, accessible components)
+- axios 1.6+
+- react-router-dom 6.18+
+
+**Infrastructure:**
+- Redis 7.0+ (local or Docker)
+- systemd or supervisord for process management
+- SQLite 3.43+
+
+---
+
+### 3. DATABASE SCHEMA
+
+**Users Table**
+```sql
+CREATE TABLE users (
+  id INTEGER PRIMARY KEY,
+  email TEXT UNIQUE NOT NULL,
+  google_id TEXT UNIQUE,
+  name TEXT,
+  location TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  last_login TIMESTAMP,
+  settings_json TEXT  -- {theme, notifications_enabled, etc}
+);
+
+CREATE INDEX idx_users_email ON users(email);
+```
+
+**Logs Table**
+```sql
+CREATE TABLE logs (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL FOREIGN KEY REFERENCES users(id),
+  severity INTEGER CHECK (severity BETWEEN 1 AND 10),
+  symptoms TEXT,  -- JSON array: ["cough", "shortness_of_breath", ...]
+  notes TEXT,
+  latitude REAL,
+  longitude REAL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_logs_user_created ON logs(user_id, created_at);
+```
+
+**Predictions Table**
+```sql
+CREATE TABLE predictions (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL FOREIGN KEY REFERENCES users(id),
+  risk_score REAL CHECK (risk_score BETWEEN 0.0 AND 1.0),
+  risk_level TEXT CHECK (risk_level IN ('low', 'moderate', 'high')),
+  factors_json TEXT,  -- {weather: {...}, history: {...}, air_quality: {...}}
+  advice TEXT,
+  recommended_actions TEXT,  -- JSON array
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  calendar_event_id TEXT  -- Google Calendar event ID
+);
+
+CREATE INDEX idx_predictions_user_created ON predictions(user_id, created_at DESC);
+```
+
+**Google Tokens Table**
+```sql
+CREATE TABLE google_tokens (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL UNIQUE FOREIGN KEY REFERENCES users(id),
+  access_token TEXT,
+  refresh_token TEXT,
+  expires_at TIMESTAMP,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+**Model Metadata Table**
+```sql
+CREATE TABLE model_metadata (
+  id INTEGER PRIMARY KEY,
+  model_version TEXT,
+  training_date TIMESTAMP,
+  num_samples INTEGER,
+  accuracy REAL,
+  feature_names TEXT,  -- JSON array
+  model_path TEXT,  -- e.g., "models/model_v1.pkl"
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+---
+
+### 4. API ENDPOINTS
+
+**Authentication**
+- `POST /auth/google` — Google OAuth callback; exchange code for token
+- `POST /auth/refresh` — Refresh Google access token
+- `POST /auth/logout` — Clear session
+
+**Logs**
+- `POST /logs` — Submit new severity + symptoms (auth required)
+- `GET /logs` — Fetch user's log history (auth required)
+- `GET /logs/{log_id}` — Get single log details
+
+**Predictions**
+- `GET /predictions/latest` — Get latest prediction for user (auth required)
+- `GET /predictions` — Get prediction history (auth required)
+
+**Calendar Sync**
+- `POST /calendar/sync` — Manually trigger sync to Google Calendar (auth required)
+- `GET /calendar/status` — Check sync status
+
+**Admin** (internal only)
+- `POST /admin/retrain` — Trigger model retraining
+- `GET /admin/health` — System health check (DB, Redis, scheduler)
+
+---
+
+### 5. ML PIPELINE
+
+**Model Architecture:**
+- **Estimator:** RandomForestClassifier (n_estimators=100, max_depth=10)
+- **Target:** Binary classification (flare-up risk: 0=low, 1=high)
+  - Definition: flare-up = average severity over next 7 days ≥ 6
+- **Features (30–40 total):**
+  - **Symptom history (14 days):** mean/max/min/count of severity, symptom frequency
+  - **Weather (current + forecast):** temperature, humidity, pressure, pollen (if available)
+  - **Air quality (current):** AQI, PM2.5, PM10, ozone
+  - **Time features:** day-of-week, season, time-since-last-log
+  - **User demographics:** age_group (derived from registration), location
+  - **Interaction terms:** severity × AQI, humidity × symptoms
+
+**Feature Extraction:**
+- All features normalized (StandardScaler)
+- Missing values imputed with median (for historical) or 0 (for current)
+- Categorical features one-hot encoded
+
+**Training Data:**
+- **Mock generation:** 200 synthetic logs per test user (600 total)
+  - Realistic patterns: higher severity on high-AQI days, seasonal peaks
+  - Varied symptoms: cough, shortness_of_breath, wheezing, chest_tightness, nighttime_symptoms
+- **Initial training:** Mock data only (train/val split 80/20)
+- **Periodic retraining:** Weekly merge of mock + accumulated real user logs
+
+**Model Persistence:**
+- Save trained model to `models/model_{date}.pkl` after each training
+- Load latest model at startup; fall back to mock model if missing
+
+---
+
+### 6. MOCK DATA GENERATION
+
+**3 Test Users:**
+1. **Alice (age 22):** Urban location (high-pollution area); frequent seasonal peaks
+   - Email: alice@test.com | Password: (Google-only)
+   - 150 logs over 6 months; avg severity 4.5
+2. **Bob (age 35):** Suburban; exercise-induced asthma
+   - Email: bob@test.com
+   - 150 logs; avg severity 3.2; spikes after workouts
+3. **Charlie (age 18):** Rural; allergen-triggered
+   - Email: charlie@test.com
+   - 150 logs; avg severity 3.8; peaks in spring/fall
+
+**Mock Data Characteristics:**
+- Timestamps: realistic gaps (1–5 days between logs)
+- Severity: correlated with historical AQI, temperature, pollen (when available)
+- Symptoms: Randomly selected from 5 types; high-severity logs tend to have multiple symptoms
+- Locations: Realistic GPS coords for each user
+
+**Seed Script:**
+- Run `python -m ml.mock_data --users 3 --logs-per-user 200` to generate and insert into DB
+
+---
+
+### 7. DEPLOYMENT CHECKLIST
+
+**Local Development (no Docker):**
+1. Clone repo; create venv
+2. `pip install -r backend/requirements.txt`
+3. `cd frontend && npm install`
+4. Create `.env` with Google OAuth credentials, OpenWeatherMap API key (optional)
+5. Run `./startup.sh`:
+   - Initialize SQLite DB (create tables)
+   - Generate mock data
+   - Train initial ML model
+   - Start Redis in background (`redis-server`)
+   - Start Celery worker (`celery -A tasks.celery_app worker --loglevel=info`)
+   - Start FastAPI server (`uvicorn app.main:app --host 0.0.0.0 --port 8000`)
+   - Start React dev server (`cd frontend && npm start`)
+
+**Unattended Operation (Linux systemd):**
+- Create systemd services:
+  - `asthma-api.service` (FastAPI + gunicorn)
+  - `asthma-celery-worker.service` (Celery worker)
+  - `asthma-celery-beat.service` (Celery beat scheduler)
+  - `asthma-redis.service` (Redis)
+- All services configured to auto-restart on crash (Restart=always)
+- Watchdog timeout: 30s (kill and restart if hung)
+- Logging: JSON to syslog or local file
+
+**Error Recovery:**
+- Celery DLQ: Failed tasks logged but don't block others
+- API failures: Graceful degradation (use cached data, return 503 if critical)
+- Token expiry: Re-auth prompt on frontend; log to error queue
+
+---
+
+### 8. TEST MATRIX
+
+| Test | Type | Coverage | Status |
+|------|------|----------|--------|
+| test_ml_model_unit | Unit | Feature engineering, risk scoring, edge cases | Planned |
+| test_log_ingestion | Integration | POST /logs → DB conformance | Planned |
+| test_prediction_pipeline | Integration | Prediction job with mocked weather; cache fallback | Planned |
+| test_auth_flow_e2e | E2E | Google OAuth sign-in, token refresh, expiry re-auth | Planned |
+| test_calendar_sync | Integration | Event creation on Google Calendar; error handling | Planned |
+| test_schema_conformance | Conformance | All API responses match declared schemas | Planned |
+| test_error_recovery | Integration | Celery crash + restart; DLQ inspection | Planned |
+| test_graceful_degradation | Integration | Prediction with stale cache; no silent failures | Planned |
+
+**Coverage Target:** ≥80% for backend components; focus on risky edges (APIs, auth, ML).
+
+---
+
+### 9. KEY DECISIONS SUMMARY
+
+| Decision | Rationale | Risk Mitigation |
+|----------|-----------|-----------------|
+| SQLite + SQLAlchemy | Zero-ops, cloud-ready ORM | No backup (acceptable for prototype) |
+| FastAPI + async | Fast, modern, handles concurrent requests | Structured exception handling |
+| Celery + Redis | Decouples long-running work; local and scalable | DLQ for failed tasks; watchdog restart |
+| Classical ML (RandomForest) | Interpretable, fast training, works with small data | Weekly retraining on real data; mock data representative |
+| Free APIs + caching | Reduces cost; cache handles rate limits | Exponential backoff + graceful degradation |
+| Google OAuth | Single sign-on; official Calendar API | Token refresh retry; force re-auth on failure |
+| React + Chakra UI | Warm, accessible UX; TypeScript prevents bugs | Component testing; accessibility audits optional |
+
+---
+
+**This plan is now complete and ready for implementation.**
+
+---
+
+Shall I proceed to **Phase 5: Build & test the full web app**? I'll:
+1. Create the project structure
+2. Implement backend (FastAPI, ORM, auth, services, scheduler)
+3. Generate mock data & train initial model
+4. Build React frontend with Chakra UI
+5. Write & run all 8 tests
+6. Create startup & deployment scripts
+
+This will take ~30–60 minutes depending on complexity. Ready?

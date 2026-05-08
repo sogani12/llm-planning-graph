@@ -115,7 +115,10 @@ def add_example_from_existing_graphs(output_file = "data/training_examples.json"
         try:
             with open(graph_file, "r", encoding="utf-8") as f:
                 graph = json.load(f)
-            from graph_classifier import classify_graph, build_metadata_from_characteristics
+            
+            # Create minimal training example
+            from prefix_tuning.graph_classifier import classify_graph, build_metadata_from_characteristics
+            
             characteristics = classify_graph(graph)
             metadata = build_metadata_from_characteristics(characteristics)
             example = {

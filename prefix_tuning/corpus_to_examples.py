@@ -87,7 +87,9 @@ def process_corpus(corpus_dir = "data/raw/github/", output_dir = "data/extracted
             if graph is None:
                 logger.warning(f"  Chunk {chunk_idx}: extraction failed, skipping")
                 continue
-            from graph_classifier import classify_graph, build_metadata_from_characteristics
+            
+            # Classify graph
+            from prefix_tuning.graph_classifier import classify_graph, build_metadata_from_characteristics
             try:
                 characteristics = classify_graph(graph)
                 metadata = build_metadata_from_characteristics(characteristics)
