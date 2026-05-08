@@ -1,0 +1,20 @@
+Ask any clarifying questions you need before planning.
+
+Build an autonomous research agent system with the following capabilities:
+
+* Accept a high-level research topic as input (e.g., "impact of AI on healthcare").
+* Automatically search and retrieve relevant information from multiple web sources.
+* Extract, summarize, and synthesize information into a structured report.
+* Handle conflicting or duplicate information across sources.
+* Maintain citations and references for all extracted information.
+* Generate a final well-formatted research report.
+
+System requirements:
+
+* Operate as a multi-step pipeline (retrieval → processing → synthesis → output).
+* Run autonomously with minimal human input once started.
+* Handle failures such as API errors, missing data, or partial results.
+* Include a testing strategy that does not rely on live API calls.
+* Ensure scalability for multiple research queries.
+
+Design the full system architecture, including components, data flow, and key technical decisions.

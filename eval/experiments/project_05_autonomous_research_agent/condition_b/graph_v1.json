@@ -1,0 +1,189 @@
+{
+  "nodes": [
+    {
+      "id": "obj_autonomous_research",
+      "type": "objective",
+      "label": "Fully autonomous research pipeline",
+      "description": "Accept a topic, retrieve sources, synthesize findings, and emit a report without human intervention."
+    },
+    {
+      "id": "obj_structured_output",
+      "type": "objective",
+      "label": "Well-formatted cited reports",
+      "description": "Final output must be human-readable with clear sections, citations, and references."
+    },
+    {
+      "id": "obj_concurrent_scale",
+      "type": "objective",
+      "label": "Support ~200 concurrent queries/day",
+      "description": "System must handle parallel research queries on a single local machine without queue starvation or resource exhaustion."
+    },
+    {
+      "id": "req_autonomous",
+      "type": "requirement",
+      "label": "Minimal human input post-start",
+      "description": "Once a query is submitted, the pipeline runs to completion or structured failure with no prompts.",
+      "is_functional": true
+    },
+    {
+      "id": "req_citations",
+      "type": "requirement",
+      "label": "All claims must carry source citations",
+      "description": "Every extracted fact or summary block in the report must link back to its source URL and retrieval timestamp.",
+      "is_functional": true
+    },
+    {
+      "id": "req_failure_handling",
+      "type": "requirement",
+      "label": "Graceful degradation on partial failures",
+      "description": "API errors, missing sources, or scraping failures must not abort the full pipeline — partial results are valid output.",
+      "is_functional": true
+    },
+    {
+      "id": "req_dedup",
+      "type": "requirement",
+      "label": "Deduplicate and reconcile conflicting sources",
+      "description": "Duplicate content across sources must be collapsed; conflicting claims must be flagged, not silently merged.",
+      "is_functional": true
+    },
+    {
+      "id": "req_offline_tests",
+      "type": "requirement",
+      "label": "Test suite must not require live API calls",
+      "description": "All tests must be runnable offline using fixtures, mocks, and recorded responses.",
+      "is_functional": false
+    },
+    {
+      "id": "dec_search_api",
+      "type": "decision",
+      "label": "Use Tavily as the search and retrieval API",
+      "description": "Tavily is selected as the primary web search provider, returning full cleaned page content per result.",
+      "rationale": "Tavily is purpose-built for AI agent pipelines — it returns full page text (not snippets), includes relevance scoring, and eliminates a separate scraping layer. Its Python SDK integrates cleanly with async code.",
+      "alternatives_considered": ["Serper (snippets only, requires scraping layer)", "Bing Search API (snippet-based, higher per-call cost)", "Google Custom Search API (quota limits, snippet-only on free tier)", "SerpAPI (costly at scale)"]
+    },
+    {
+      "id": "dec_llm",
+      "type": "decision",
+      "label": "Use Claude (Anthropic API) for summarization and synthesis",
+      "description": "Claude is the LLM backbone for per-source summarization, conflict detection, and final synthesis.",
+      "rationale": "Large context window (100K+) handles multi-source synthesis in a single pass. Structured output support via tool use enables reliable JSON extraction for citation tracking. Strong instruction-following for report formatting.",
+      "alternatives_considered": ["OpenAI GPT-4o (comparable capability, different pricing structure)", "Ollama local models (no API cost, but slower on CPU, weaker synthesis quality at local sizes)", "Gemini 1.5 Pro (large context, less mature tooling ecosystem)"]
+    },
+    {
+      "id": "dec_orchestration",
+      "type": "decision",
+      "label": "Custom async Python pipeline (asyncio)",
+      "description": "The pipeline is implemented as a hand-rolled async DAG in Python rather than a framework like LangGraph or Prefect.",
+      "rationale": "The pipeline has a fixed, well-defined stage sequence (retrieve → chunk → summarize → deduplicate → synthesize → render). A custom DAG gives full control over error boundaries, retry logic, and semaphore-based concurrency without framework overhead or abstraction leakage.",
+      "alternatives_considered": ["LangChain/LangGraph (adds abstraction overhead, harder to debug, overkill for fixed pipeline)", "Prefect/Dagster (workflow orchestration tools suited for scheduled ETL, not interactive agent pipelines)", "Celery + Redis (requires a Redis server, adds infra complexity on local machine)"]
+    },
+    {
+      "id": "dec_storage",
+      "type": "decision",
+      "label": "SQLite for job state, filesystem for artifacts",
+      "description": "SQLite tracks job metadata, source hashes for deduplication, and run history. Raw content and final reports live as files on disk.",
+      "rationale": "No server to manage. SQLite is sufficient for 200 jobs/day on a single machine. File-per-artifact is simple, inspectable, and avoids blob storage complexity.",
+      "alternatives_considered": ["PostgreSQL (server overhead, unnecessary for local)", "DuckDB (good for analytics queries, less suited for transactional job state)", "Pure filesystem with JSON sidecar files (loses queryability for dedup lookups)"]
+    },
+    {
+      "id": "dec_concurrency",
+      "type": "decision",
+      "label": "asyncio with bounded semaphore for concurrent queries",
+      "description": "Concurrent queries are managed via an asyncio semaphore capping simultaneous in-flight pipelines.",
+      "rationale": "200/day averages ~8/hour but bursts are expected. A semaphore cap (e.g., 5–10 concurrent) prevents memory exhaustion and API rate-limit collisions without a separate job queue server.",
+      "alternatives_considered": ["multiprocessing (CPU-bound workloads; this pipeline is I/O-bound, asyncio is more efficient)", "ThreadPoolExecutor (GIL limits true parallelism; asyncio handles I/O concurrency natively)", "Ray (distributed computing framework, overkill for single-machine local target)"]
+    },
+    {
+      "id": "dec_output",
+      "type": "decision",
+      "label": "Markdown primary output, PDF via WeasyPrint",
+      "description": "The pipeline writes a structured Markdown report as its canonical artifact; PDF is rendered from it via WeasyPrint.",
+      "rationale": "Markdown is version-controllable, diff-able, and easily inspected. WeasyPrint converts HTML/CSS to PDF without requiring LaTeX or headless Chrome.",
+      "alternatives_considered": ["LaTeX (high-quality PDFs but heavy dependency, complex templating)", "ReportLab (programmatic PDF, verbose, poor for narrative text)", "Pandoc (excellent converter but adds a system binary dependency)"]
+    },
+    {
+      "id": "asm_tavily_rate_limits",
+      "type": "assumption",
+      "label": "Tavily API rate limits accommodate burst concurrency",
+      "description": "Assumes Tavily's plan tier allows enough requests/minute to serve 10 concurrent pipelines each making 3–5 search calls without throttling.",
+      "confidence": 0.6,
+      "validated": false
+    },
+    {
+      "id": "asm_context_window",
+      "type": "assumption",
+      "label": "Multi-source content fits Claude's context window",
+      "description": "Assumes that the combined chunked summaries from all sources for a single topic fit within Claude's context window for the synthesis step.",
+      "confidence": 0.75,
+      "validated": false
+    },
+    {
+      "id": "asm_local_resources",
+      "type": "assumption",
+      "label": "Local machine can sustain 5–10 concurrent async pipelines",
+      "description": "Assumes the host machine has enough RAM and network bandwidth for concurrent Tavily fetches and LLM calls without thrashing.",
+      "confidence": 0.7,
+      "validated": false
+    },
+    {
+      "id": "asm_tavily_content_quality",
+      "type": "assumption",
+      "label": "Tavily returns substantive full-page content reliably",
+      "description": "Assumes Tavily successfully extracts readable text from the majority of retrieved URLs (vs. returning empty or JavaScript-only shells).",
+      "confidence": 0.65,
+      "validated": false
+    },
+    {
+      "id": "risk_api_cost",
+      "type": "risk",
+      "label": "LLM + search API costs escalate at scale",
+      "description": "At 200 queries/day with 5–10 LLM calls per query, token costs could become significant. No cost cap is currently modeled.",
+      "severity": 0.7
+    },
+    {
+      "id": "risk_rate_limiting",
+      "type": "risk",
+      "label": "API rate limits throttle or fail concurrent pipelines",
+      "description": "Bursts of concurrent queries may exhaust Tavily or Claude API rate limits, causing cascading failures across multiple pipelines.",
+      "severity": 0.8
+    },
+    {
+      "id": "risk_hallucination",
+      "type": "risk",
+      "label": "LLM hallucination in synthesis step",
+      "description": "Claude may introduce claims not grounded in retrieved sources during the synthesis step, undermining report accuracy.",
+      "severity": 0.75
+    },
+    {
+      "id": "risk_content_quality",
+      "type": "risk",
+      "label": "Poor or paywalled source content degrades report quality",
+      "description": "Many high-quality sources (academic papers, news archives) are paywalled or return minimal content, reducing synthesis quality.",
+      "severity": 0.65
+    },
+    {
+      "id": "risk_dedup_false_negative",
+      "type": "risk",
+      "label": "Semantic duplicates pass hash-based deduplication",
+      "description": "Two sources reporting the same fact in different words will pass URL/hash dedup and be treated as independent corroboration.",
+      "severity": 0.6
+    }
+  ],
+  "edges": [
+    { "source_id": "dec_search_api", "target_id": "obj_autonomous_research", "type": "motivated_by" },
+    { "source_id": "dec_llm", "target_id": "obj_structured_output", "type": "motivated_by" },
+    { "source_id": "dec_concurrency", "target_id": "obj_concurrent_scale", "type": "motivated_by" },
+    { "source_id": "dec_orchestration", "target_id": "obj_autonomous_research", "type": "motivated_by" },
+    { "source_id": "dec_output", "target_id": "obj_structured_output", "type": "motivated_by" },
+    { "source_id": "dec_search_api", "target_id": "asm_tavily_rate_limits", "type": "assumes" },
+    { "source_id": "dec_search_api", "target_id": "asm_tavily_content_quality", "type": "assumes" },
+    { "source_id": "dec_llm", "target_id": "asm_context_window", "type": "assumes" },
+    { "source_id": "dec_concurrency", "target_id": "asm_local_resources", "type": "assumes" },
+    { "source_id": "risk_rate_limiting", "target_id": "dec_concurrency", "type": "conflicts_with" },
+    { "source_id": "risk_rate_limiting", "target_id": "asm_tavily_rate_limits", "type": "invalidates" },
+    { "source_id": "risk_hallucination", "target_id": "req_citations", "type": "conflicts_with" },
+    { "source_id": "risk_content_quality", "target_id": "asm_tavily_content_quality", "type": "invalidates" },
+    { "source_id": "risk_api_cost", "target_id": "dec_llm", "type": "conflicts_with" },
+    { "source_id": "risk_dedup_false_negative", "target_id": "req_dedup", "type": "conflicts_with" }
+  ]
+}
