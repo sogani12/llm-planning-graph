@@ -65,7 +65,7 @@ demo/
 
 | Member | Responsibility |
 |--------|---------------|
-| Sogani & Garey | Graph schema + extraction pipeline |
-| Motonishi & Konduru | Data collection + annotation |
-| Sehgal | Living plan maintenance + blast radius |
-| Khade | Baselines, Stage 2 eval, integration |
+| Naman Sogani & Mari Garey | Graph schema + extraction pipeline |
+| Elena Motonishi & Sreemae Konduru | Data collection + annotation |
+| Ashvin Sehgal | Living plan maintenance + blast radius |
+| Omkar Shankar Khade | Baselines, Stage 2 eval, integration |
